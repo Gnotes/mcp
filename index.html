@@ -1,0 +1,4253 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>MCP 基础：写给第一次实现协议的人</title>
+
+    <meta
+      name="description"
+      content="MCP（Model Context Protocol，模型上下文协议）2026-07-28 版本的实现要点：传输层、原语、方法命名、错误码与工具描述设计。"
+    />
+    <meta
+      name="theme-color"
+      content="#ffffff"
+      media="(prefers-color-scheme: light)"
+    />
+    <meta
+      name="theme-color"
+      content="#0e1014"
+      media="(prefers-color-scheme: dark)"
+    />
+
+    <script>
+      (function () {
+        try {
+          var saved = localStorage.getItem("mcp-doc-theme");
+          var prefersDark = window.matchMedia(
+            "(prefers-color-scheme: dark)",
+          ).matches;
+          var dark = saved ? saved === "dark" : prefersDark;
+          document.documentElement.classList.toggle("dark", dark);
+          document.documentElement.classList.toggle("light", !dark);
+        } catch (e) {}
+      })();
+    </script>
+
+    <style>
+      /* ============ 明暗双主题变量 ============ */
+      :root {
+        color-scheme: light;
+        --font-sans:
+          -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+          "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+        --font-mono:
+          ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+          "Liberation Mono", monospace;
+        --bg: #ffffff;
+        --surface: #f7f8fa;
+        --surface-2: #eef1f5;
+        --zebra: #fbfcfd;
+        --fg: #1e232e;
+        --fg-soft: #586173;
+        --border: #e4e8ef;
+        --border-strong: #d6dbe4;
+        --accent: #0f4c81;
+        --accent-soft: rgba(15, 76, 129, 0.07);
+        --link: #2563eb;
+        --code-bg: #f6f8fa;
+        --code-fg: #24292f;
+        --shadow: 0 1px 2px rgba(16, 24, 40, 0.06);
+      }
+
+      html.dark {
+        --bg: #0e1014;
+        --surface: #161921;
+        --surface-2: #1c2029;
+        --zebra: #12151b;
+        --fg: #e7eaf0;
+        --fg-soft: #98a2b3;
+        --border: #262b36;
+        --border-strong: #333a49;
+        --accent: #60a5fa;
+        --accent-soft: rgba(96, 165, 250, 0.1);
+        --link: #7cb0ff;
+        --code-bg: #14171e;
+        --code-fg: #dee4ee;
+        --shadow: 0 1px 3px rgba(0, 0, 0, 0.45);
+      }
+
+      @media (prefers-color-scheme: dark) {
+        html:not(.light) {
+          --bg: #0e1014;
+          --surface: #161921;
+          --surface-2: #1c2029;
+          --zebra: #12151b;
+          --fg: #e7eaf0;
+          --fg-soft: #98a2b3;
+          --border: #262b36;
+          --border-strong: #333a49;
+          --accent: #60a5fa;
+          --accent-soft: rgba(96, 165, 250, 0.1);
+          --link: #7cb0ff;
+          --code-bg: #14171e;
+          --code-fg: #dee4ee;
+          --shadow: 0 1px 3px rgba(0, 0, 0, 0.45);
+        }
+      }
+
+      /* ============ 基础版式 ============ */
+      html {
+        -webkit-text-size-adjust: 100%;
+        scroll-behavior: smooth;
+      }
+      body {
+        background: var(--bg) !important;
+        color: var(--fg) !important;
+        font-family: var(--font-sans) !important;
+        max-width: 920px !important;
+        margin: 0 auto !important;
+        padding: 0 !important;
+        font-size: 16px !important;
+        line-height: 1.78 !important;
+        transition:
+          background-color 0.25s ease,
+          color 0.25s ease;
+      }
+
+      section,
+      container,
+      p,
+      li,
+      td,
+      th,
+      h1,
+      h2,
+      h3,
+      h4,
+      h5,
+      h6,
+      blockquote,
+      figcaption,
+      strong,
+      em,
+      span:not(.hljs):not(.mac-sign) {
+        font-family: var(--font-sans) !important;
+      }
+
+      #output {
+        padding: 28px 22px 120px !important;
+      }
+
+      p {
+        color: var(--fg) !important;
+        margin: 0.95em 0 !important;
+      }
+
+      /* ============ 标题 ============ */
+      h1 {
+        background: transparent !important;
+        color: var(--fg) !important;
+        text-shadow: none !important;
+        padding: 0.1em 0 0.55em !important;
+        margin: 0.2em 0 0.7em !important;
+        font-size: 1.95em !important;
+        font-weight: 700 !important;
+        line-height: 1.32 !important;
+        letter-spacing: -0.01em;
+        border-bottom: 1px solid var(--border) !important;
+      }
+
+      h2 {
+        background: linear-gradient(
+          90deg,
+          var(--accent-soft),
+          transparent 72%
+        ) !important;
+        color: var(--fg) !important;
+        border-radius: 0 8px 8px 0 !important;
+        box-shadow: none !important;
+        border-left: 4px solid var(--accent) !important;
+        padding: 0.35em 0.9em !important;
+        margin: 2.4em 0 0.9em !important;
+        font-size: 1.32em !important;
+        line-height: 1.5 !important;
+        font-weight: 700 !important;
+        letter-spacing: -0.005em;
+      }
+
+      h3 {
+        background: transparent !important;
+        color: var(--accent) !important;
+        border: none !important;
+        border-left: 3px solid var(--accent) !important;
+        border-radius: 0 !important;
+        padding: 0 0 0 11px !important;
+        margin: 1.9em 0 0.6em !important;
+        font-size: 1.12em !important;
+        line-height: 1.5 !important;
+        font-weight: 600 !important;
+      }
+
+      h4 {
+        background: transparent !important;
+        color: var(--fg) !important;
+        border: none !important;
+        padding: 0 !important;
+        margin: 1.5em 0 0.5em !important;
+        font-size: 1.02em !important;
+        line-height: 1.5 !important;
+        font-weight: 600 !important;
+      }
+
+      h4::before {
+        content: "";
+        display: inline-block;
+        width: 6px;
+        height: 6px;
+        margin-right: 9px;
+        border-radius: 50%;
+        background: var(--accent);
+        vertical-align: 2px;
+      }
+
+      /* ============ 分割线 ============ */
+      hr {
+        background: linear-gradient(
+          90deg,
+          transparent,
+          var(--border-strong),
+          transparent
+        ) !important;
+        height: 1px !important;
+        border: none !important;
+        margin: 2.2em 0 !important;
+      }
+
+      /* ============ 行内代码 ============ */
+      code.codespan {
+        background: var(--surface-2) !important;
+        color: var(--accent) !important;
+        border: 1px solid var(--border) !important;
+        border-radius: 5px !important;
+        padding: 1px 6px !important;
+        font-family: var(--font-mono) !important;
+        font-size: 0.88em !important;
+        font-weight: 500;
+        word-break: break-word;
+      }
+
+      /* ============ 代码块 ============ */
+      pre.code__pre,
+      pre.hljs {
+        background: var(--code-bg) !important;
+        color: var(--code-fg) !important;
+        border: 1px solid var(--border) !important;
+        border-radius: 10px !important;
+        padding: 14px 18px !important;
+        margin: 1.15em 0 !important;
+        overflow-x: auto !important;
+        box-shadow: var(--shadow);
+        position: relative;
+        -webkit-overflow-scrolling: touch;
+      }
+
+      pre.code__pre code,
+      pre.hljs code {
+        background: transparent !important;
+        color: var(--code-fg) !important;
+        border: none !important;
+        font-family: var(--font-mono) !important;
+        font-size: 13px !important;
+        line-height: 1.72 !important;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+
+      .mac-sign {
+        display: none !important;
+      }
+
+      .copy-btn {
+        position: absolute;
+        top: 8px;
+        right: 8px;
+        font-size: 11px;
+        line-height: 1;
+        padding: 5px 8px;
+        border-radius: 5px;
+        border: 1px solid var(--border);
+        background: var(--surface);
+        color: var(--fg-soft);
+        cursor: pointer;
+        opacity: 0;
+        transition:
+          opacity 0.15s ease,
+          background-color 0.15s ease;
+      }
+
+      pre:hover .copy-btn,
+      pre:focus-within .copy-btn {
+        opacity: 1;
+      }
+
+      .copy-btn:hover {
+        background: var(--surface-2);
+        color: var(--fg);
+      }
+
+      /* ============ 表格 ============ */
+      .table-scroll {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        margin: 1.2em 0;
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        background: var(--bg);
+        box-shadow: var(--shadow);
+      }
+
+      .table-scroll table,
+      table.preview-table {
+        width: 100% !important;
+        min-width: 580px;
+        margin: 0 !important;
+        border-collapse: collapse !important;
+        border-spacing: 0;
+        font-size: 14px;
+      }
+
+      th,
+      td {
+        border: none !important;
+        border-bottom: 1px solid var(--border) !important;
+        padding: 10px 14px !important;
+        text-align: left;
+        vertical-align: top;
+        color: var(--fg) !important;
+        line-height: 1.62;
+      }
+
+      th {
+        background: var(--surface-2) !important;
+        color: var(--fg) !important;
+        font-weight: 600 !important;
+        white-space: nowrap;
+        position: sticky;
+        top: 0;
+        z-index: 1;
+      }
+
+      tbody tr:nth-child(even) td {
+        background: var(--zebra) !important;
+      }
+      tbody tr:last-child td {
+        border-bottom: none !important;
+      }
+      table.preview-table tbody tr:hover td {
+        background: var(--accent-soft) !important;
+      }
+
+      /* ============ 引用块 ============ */
+      blockquote {
+        background: var(--surface) !important;
+        border: none !important;
+        border-left: 3px solid var(--accent) !important;
+        border-radius: 0 8px 8px 0 !important;
+        padding: 12px 16px !important;
+        margin: 1.2em 0 !important;
+        color: var(--fg-soft) !important;
+        font-style: normal !important;
+      }
+
+      blockquote p {
+        color: var(--fg-soft) !important;
+        margin: 0.3em 0 !important;
+      }
+
+      /* ============ 列表 ============ */
+      ul,
+      ol {
+        padding-left: 1.5em !important;
+        margin: 0.9em 0 !important;
+      }
+      li {
+        margin: 0.42em 0 !important;
+        color: var(--fg) !important;
+      }
+      ul li::marker {
+        color: var(--accent);
+      }
+      ol li::marker {
+        color: var(--accent);
+        font-weight: 600;
+      }
+
+      /* ============ 链接 ============ */
+      a {
+        color: var(--link) !important;
+        text-decoration: none !important;
+        border-bottom: 1px solid transparent;
+      }
+      a:hover {
+        border-bottom-color: var(--link);
+      }
+
+      strong {
+        color: var(--fg) !important;
+        font-weight: 700;
+      }
+
+      img {
+        max-width: 100%;
+        height: auto;
+        border-radius: 8px;
+        border: 1px solid var(--border) !important;
+      }
+
+      /* ============ 顶栏控件 ============ */
+      .topbar {
+        position: fixed;
+        top: 16px;
+        right: 16px;
+        display: flex;
+        gap: 8px;
+        z-index: 60;
+      }
+
+      .icon-btn {
+        width: 40px;
+        height: 40px;
+        display: grid;
+        place-items: center;
+        border-radius: 10px;
+        border: 1px solid var(--border);
+        background: var(--bg);
+        color: var(--fg);
+        cursor: pointer;
+        box-shadow: var(--shadow);
+        transition:
+          background-color 0.18s ease,
+          transform 0.18s ease;
+      }
+
+      .icon-btn:hover {
+        background: var(--surface-2);
+        transform: translateY(-1px);
+      }
+      .icon-btn svg {
+        width: 18px;
+        height: 18px;
+        fill: none;
+        stroke: currentColor;
+        stroke-width: 1.8;
+      }
+
+      /* ============ 抽屉目录 ============ */
+      .toc-mask {
+        position: fixed;
+        inset: 0;
+        background: rgba(8, 10, 14, 0.45);
+        opacity: 0;
+        visibility: hidden;
+        transition: opacity 0.22s ease;
+        z-index: 70;
+      }
+
+      .toc-mask.open {
+        opacity: 1;
+        visibility: visible;
+      }
+
+      .toc-drawer {
+        position: fixed;
+        top: 0;
+        right: 0;
+        bottom: 0;
+        width: min(320px, 86vw);
+        background: var(--bg);
+        border-left: 1px solid var(--border);
+        box-shadow: -8px 0 28px rgba(0, 0, 0, 0.12);
+        transform: translateX(100%);
+        transition: transform 0.26s cubic-bezier(0.22, 0.61, 0.36, 1);
+        z-index: 80;
+        display: flex;
+        flex-direction: column;
+      }
+
+      .toc-drawer.open {
+        transform: translateX(0);
+      }
+
+      .toc-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 16px 18px;
+        border-bottom: 1px solid var(--border);
+        font-size: 13px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--fg-soft);
+      }
+
+      .toc-close {
+        border: none;
+        background: transparent;
+        cursor: pointer;
+        color: var(--fg-soft);
+        font-size: 20px;
+        line-height: 1;
+        padding: 2px 6px;
+        border-radius: 6px;
+      }
+
+      .toc-close:hover {
+        background: var(--surface-2);
+        color: var(--fg);
+      }
+
+      .toc-list {
+        overflow-y: auto;
+        padding: 10px 8px 40px;
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        flex: 1;
+      }
+
+      .toc-item {
+        display: block;
+        padding: 8px 12px;
+        border-radius: 7px;
+        color: var(--fg) !important;
+        font-size: 14px;
+        border: none !important;
+        line-height: 1.45;
+      }
+
+      .toc-item:hover {
+        background: var(--surface-2);
+      }
+
+      .toc-sub {
+        margin-left: 12px;
+        font-size: 12.8px;
+        color: var(--fg-soft) !important;
+        padding: 6px 10px;
+        border-left: 1px solid var(--border) !important;
+        border-radius: 0 6px 6px 0;
+      }
+
+      .toc-item.active {
+        background: var(--accent-soft);
+        color: var(--accent) !important;
+        font-weight: 600;
+      }
+
+      /* ============ 阅读进度条 ============ */
+      .progress {
+        position: fixed;
+        top: 0;
+        left: 0;
+        height: 3px;
+        width: 0;
+        background: var(--accent);
+        z-index: 90;
+        transition: width 0.1s linear;
+      }
+
+      /* ============ 移动端适配 ============ */
+      @media (max-width: 700px) {
+        body {
+          font-size: 15.5px !important;
+          max-width: 100% !important;
+        }
+        #output {
+          padding: 20px 15px 96px !important;
+        }
+        h1 {
+          font-size: 1.5em !important;
+        }
+        h2 {
+          font-size: 1.18em !important;
+          padding: 0.32em 0.7em !important;
+          margin: 2em 0 0.75em !important;
+        }
+        h3 {
+          font-size: 1.05em !important;
+          margin: 1.6em 0 0.5em !important;
+        }
+        pre.code__pre,
+        pre.hljs {
+          padding: 12px 13px !important;
+          border-radius: 8px !important;
+        }
+        pre.code__pre code,
+        pre.hljs code {
+          font-size: 11.5px !important;
+          white-space: pre !important;
+          word-break: normal !important;
+        }
+        th,
+        td {
+          padding: 9px 11px !important;
+          font-size: 13px;
+        }
+        .topbar {
+          top: 10px;
+          right: 10px;
+          gap: 6px;
+        }
+        .icon-btn {
+          width: 36px;
+          height: 36px;
+          border-radius: 9px;
+        }
+        .copy-btn {
+          opacity: 1;
+        }
+        blockquote {
+          padding: 10px 13px !important;
+        }
+      }
+
+      /* 打印：强制浅色，去掉浮层 */
+      @media print {
+        .topbar,
+        .toc-drawer,
+        .toc-mask,
+        .progress,
+        .copy-btn {
+          display: none !important;
+        }
+        body {
+          max-width: 100% !important;
+          color: #000 !important;
+          background: #fff !important;
+        }
+        pre.code__pre {
+          background: #f5f5f5 !important;
+          color: #222 !important;
+          -webkit-print-color-adjust: exact;
+          print-color-adjust: exact;
+        }
+        pre.code__pre code {
+          color: #222 !important;
+        }
+        .table-scroll {
+          overflow: visible !important;
+        }
+        table {
+          min-width: 0 !important;
+        }
+        h2,
+        h3 {
+          break-after: avoid;
+        }
+        pre,
+        table {
+          break-inside: avoid;
+        }
+      }
+
+      /* 首屏淡入：只用 opacity，避免 transform 生成 fixed 包含块 */
+      #output {
+        animation: fadeIn 0.45s ease both;
+      }
+      @keyframes fadeIn {
+        from {
+          opacity: 0;
+        }
+        to {
+          opacity: 1;
+        }
+      }
+    </style>
+  </head>
+  <body
+    style="
+      padding: 24px;
+      background: #ffffff;
+      max-width: 860px;
+      margin: 0 auto;
+      font-family:
+        -apple-system-font,
+        BlinkMacSystemFont,
+        Helvetica Neue,
+        PingFang SC,
+        Hiragino Sans GB,
+        Microsoft YaHei UI,
+        Microsoft YaHei,
+        Arial,
+        sans-serif;
+      font-size: 16px;
+      line-height: 1.75;
+      text-align: left;
+    "
+  >
+    <div class="progress" id="progress"></div>
+    <div class="topbar">
+      <button
+        class="icon-btn"
+        id="themeBtn"
+        title="切换明暗模式"
+        aria-label="切换明暗模式"
+      >
+        <svg id="iconMoon" viewBox="0 0 24 24">
+          <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" />
+        </svg>
+        <svg id="iconSun" viewBox="0 0 24 24" style="display: none">
+          <circle cx="12" cy="12" r="4.2" />
+          <path
+            d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M19.1 4.9l-1.4 1.4M6.3 17.7l-1.4 1.4"
+          />
+        </svg>
+      </button>
+      <button
+        class="icon-btn"
+        id="tocBtn"
+        title="打开目录"
+        aria-label="打开目录"
+      >
+        <svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10" /></svg>
+      </button>
+      <button
+        class="icon-btn"
+        id="topBtn"
+        title="回到顶部"
+        aria-label="回到顶部"
+      >
+        <svg viewBox="0 0 24 24">
+          <path d="M12 19V5M5.5 11.5L12 5l6.5 6.5" />
+        </svg>
+      </button>
+    </div>
+
+    <div class="toc-mask" id="tocMask"></div>
+    <aside class="toc-drawer" id="tocDrawer">
+      <div class="toc-head">
+        <span>目录</span
+        ><button class="toc-close" id="tocClose" aria-label="关闭目录">
+          &times;
+        </button>
+      </div>
+      <nav class="toc-list" id="tocList">
+        <a class="toc-item" href="#s1" data-target="s1"
+          >1. MCP 解决的是什么问题</a
+        >
+        <a class="toc-item" href="#s2" data-target="s2"
+          >2. 一条演进线：五个版本，四次纠错</a
+        >
+        <a class="toc-item" href="#s3" data-target="s3"
+          >3. 两层结构：数据层与传输层</a
+        >
+        <a class="toc-item toc-sub" href="#s3-1" data-target="s3-1"
+          >3.1 三种消息</a
+        >
+        <a class="toc-item toc-sub" href="#s3-2" data-target="s3-2"
+          >3.2 结果必须带 resultType</a
+        >
+        <a class="toc-item" href="#s4" data-target="s4">4. 两种传输</a>
+        <a class="toc-item toc-sub" href="#s4-1" data-target="s4-1"
+          >4.1 stdio</a
+        >
+        <a class="toc-item toc-sub" href="#s4-2" data-target="s4-2"
+          >4.2 Streamable HTTP</a
+        >
+        <a class="toc-item toc-sub" href="#s4-3" data-target="s4-3">4.3 对比</a>
+        <a class="toc-item toc-sub" href="#s4-4" data-target="s4-4"
+          >4.4 为什么只能 POST</a
+        >
+        <a class="toc-item toc-sub" href="#s4-5" data-target="s4-5"
+          >4.5 传输层硬性要求（2026-07-28）</a
+        >
+        <a class="toc-item" href="#s5" data-target="s5"
+          >5. 原语（primitives）</a
+        >
+        <a class="toc-item toc-sub" href="#s5-1" data-target="s5-1"
+          >5.1 为什么非要这样分</a
+        >
+        <a class="toc-item" href="#s6" data-target="s6">6. 方法命名</a>
+        <a class="toc-item toc-sub" href="#s6-1" data-target="s6-1"
+          >6.1 是约定，不是随手起</a
+        >
+        <a class="toc-item toc-sub" href="#s6-2" data-target="s6-2"
+          >6.2 格式规律</a
+        >
+        <a class="toc-item toc-sub" href="#s6-3" data-target="s6-3"
+          >6.3 完整方法清单</a
+        >
+        <a class="toc-item toc-sub" href="#s6-4" data-target="s6-4"
+          >6.4 工具名本身的约定</a
+        >
+        <a class="toc-item" href="#s7" data-target="s7"
+          >7. 一次完整调用长什么样</a
+        >
+        <a class="toc-item toc-sub" href="#s7-1" data-target="s7-1">7.1 发现</a>
+        <a class="toc-item toc-sub" href="#s7-2" data-target="s7-2"
+          >7.2 列工具</a
+        >
+        <a class="toc-item toc-sub" href="#s7-3" data-target="s7-3"
+          >7.3 调工具</a
+        >
+        <a class="toc-item toc-sub" href="#s7-4" data-target="s7-4"
+          >7.4 多轮往返（MRTR）</a
+        >
+        <a class="toc-item toc-sub" href="#s7-5" data-target="s7-5"
+          >7.5 与 2025 年教程的差异清单</a
+        >
+        <a class="toc-item" href="#s8" data-target="s8">8. JSON-RPC 错误码</a>
+        <a class="toc-item toc-sub" href="#s8-1" data-target="s8-1"
+          >8.1 三段区间</a
+        >
+        <a class="toc-item toc-sub" href="#s8-2" data-target="s8-2"
+          >8.2 标准码（来自 JSON-RPC 2.0）</a
+        >
+        <a class="toc-item toc-sub" href="#s8-3" data-target="s8-3"
+          >8.3 MCP 专用码（2026-07-28）</a
+        >
+        <a class="toc-item toc-sub" href="#s8-4" data-target="s8-4"
+          >8.4 已废弃、不能再发的码</a
+        >
+        <a class="toc-item toc-sub" href="#s8-5" data-target="s8-5"
+          >8.5 错误码与 HTTP 状态码是两层，必须同时给</a
+        >
+        <a class="toc-item toc-sub" href="#s8-6" data-target="s8-6"
+          >8.6 业务失败不要用错误码</a
+        >
+        <a class="toc-item" href="#s9" data-target="s9"
+          >9. 模型怎么知道你的工具</a
+        >
+        <a class="toc-item toc-sub" href="#s9-1" data-target="s9-1"
+          >9.1 第一层：enum 让它发现选项存在</a
+        >
+        <a class="toc-item toc-sub" href="#s9-2" data-target="s9-2"
+          >9.2 第二层：tool 级 description 划清边界</a
+        >
+        <a class="toc-item toc-sub" href="#s9-3" data-target="s9-3"
+          >9.3 第三层：错误文本反向纠正</a
+        >
+        <a class="toc-item toc-sub" href="#s9-4" data-target="s9-4"
+          >9.4 上下文预算</a
+        >
+        <a class="toc-item" href="#s10" data-target="s10">10. 常见误解清单</a>
+        <a class="toc-item" href="#s11" data-target="s11">11. 术语表</a>
+        <a class="toc-item" href="#s12" data-target="s12">12. 参考</a>
+        <a class="toc-item toc-sub" href="#s12-1" data-target="s12-1"
+          >12.1 规范正文（2026-07-28）</a
+        >
+        <a class="toc-item toc-sub" href="#s12-2" data-target="s12-2"
+          >12.2 发布说明与架构文档</a
+        >
+        <a class="toc-item toc-sub" href="#s12-3" data-target="s12-3"
+          >12.3 底层标准</a
+        >
+        <a class="toc-item toc-sub" href="#s12-4" data-target="s12-4"
+          >12.4 查阅旧版</a
+        >
+      </nav>
+    </aside>
+
+    <div id="output">
+      <section
+        class="container"
+        style="
+          font-family:
+            -apple-system-font,
+            BlinkMacSystemFont,
+            Helvetica Neue,
+            PingFang SC,
+            Hiragino Sans GB,
+            Microsoft YaHei UI,
+            Microsoft YaHei,
+            Arial,
+            sans-serif;
+          font-size: 16px;
+          line-height: 1.75;
+          text-align: left;
+        "
+      >
+        <hr
+          class="hr"
+          style="
+            height: 1px;
+            border: none;
+            margin: 2em 0;
+            background: linear-gradient(
+              to right,
+              rgba(0, 0, 0, 0),
+              rgba(0, 0, 0, 0.1),
+              rgba(0, 0, 0, 0)
+            );
+            margin-top: 0 !important;
+          "
+        />
+        <hr
+          class="hr"
+          style="
+            height: 1px;
+            border: none;
+            margin: 2em 0;
+            background: linear-gradient(
+              to right,
+              rgba(0, 0, 0, 0),
+              rgba(0, 0, 0, 0.1),
+              rgba(0, 0, 0, 0)
+            );
+          "
+        />
+        <h1
+          class="h1"
+          data-heading="true"
+          style="
+            padding: 0.5em 1em;
+            font-size: calc(16px * 1.4);
+            text-shadow: 1px 1px 3px rgba(0, 0, 0, 0.05);
+          "
+        >
+          MCP 基础：写给第一次实现协议的人
+        </h1>
+        <p class="p">
+          配套文档 · 2026-11-11 · 依据
+          <a
+            href="https://modelcontextprotocol.io/specification/2026-07-28"
+            title="MCP 规范 2026-07-28"
+            style="color: #576b95; text-decoration: none"
+            >MCP 规范 2026-07-28</a
+          >
+        </p>
+        <p class="p">
+          本文记录实现
+          <code class="codespan">mcp</code>
+          前必须先搞清的概念，是补课材料：协议怎么演化来的、两种传输差在哪、方法名和错误码有没有规矩、模型怎么知道你有什么工具。
+        </p>
+        <hr
+          class="hr"
+          style="
+            height: 1px;
+            border: none;
+            margin: 2em 0;
+            background: linear-gradient(
+              to right,
+              rgba(0, 0, 0, 0),
+              rgba(0, 0, 0, 0.1),
+              rgba(0, 0, 0, 0)
+            );
+          "
+        />
+        <h2
+          class="h2"
+          data-heading="true"
+          style="
+            padding: 0.3em 1.2em;
+            font-size: calc(16px * 1.3);
+            border-radius: 8px 24px 8px 24px;
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.06);
+          "
+          id="s1"
+        >
+          1. MCP 解决的是什么问题
+        </h2>
+        <p class="p">
+          一个 AI
+          应用想读文件、查数据库、调接口，如果每种能力都写死在自己的代码里，就会变成
+          M 个应用乘 N 个工具的组合爆炸。<strong
+            >MCP(Model Context Protocol, 模型上下文协议)</strong
+          >
+          做的事是把中间那一层标准化：应用只实现一次客户端，工具只实现一次服务端，两边用同一套报文对话。
+        </p>
+        <p class="p">两个成熟的类比能帮上忙：</p>
+        <ul class="ul" style="list-style: none; padding-left: 1.5em">
+          <li class="listitem" style="margin: 0.5em 8px">
+            •
+            <strong>USB-C</strong
+            >：以前每个设备一种接口，现在设备和服务共用一种插头。
+          </li>
+          <li class="listitem" style="margin: 0.5em 8px">
+            • <strong>LSP(Language Server Protocol, 语言服务器协议)</strong>：VS
+            Code
+            不需要为每门语言写补全逻辑，语言的作者提供一个统一协议的服务端即可。MCP
+            是同一个思路，只是把&quot;语言&quot;换成了&quot;工具与数据&quot;。
+          </li>
+        </ul>
+        <p class="p">
+          一句话记法：<strong>MCP 是 AI 应用和外部能力之间的插头标准。</strong>
+        </p>
+        <hr
+          class="hr"
+          style="
+            height: 1px;
+            border: none;
+            margin: 2em 0;
+            background: linear-gradient(
+              to right,
+              rgba(0, 0, 0, 0),
+              rgba(0, 0, 0, 0.1),
+              rgba(0, 0, 0, 0)
+            );
+          "
+        />
+        <h2
+          class="h2"
+          data-heading="true"
+          style="
+            padding: 0.3em 1.2em;
+            font-size: calc(16px * 1.3);
+            border-radius: 8px 24px 8px 24px;
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.06);
+          "
+          id="s2"
+        >
+          2. 一条演进线：五个版本，四次纠错
+        </h2>
+        <p class="p">
+          理解版本史不是为了背日期，而是为了知道<strong>为什么</strong>现在的写法长这样。很多教程还停在旧版，你按旧版写会连不上新客户端。
+        </p>
+        <section
+          style="
+            font-family:
+              -apple-system-font,
+              BlinkMacSystemFont,
+              Helvetica Neue,
+              PingFang SC,
+              Hiragino Sans GB,
+              Microsoft YaHei UI,
+              Microsoft YaHei,
+              Arial,
+              sans-serif;
+            font-size: 16px;
+            line-height: 1.75;
+            text-align: left;
+            max-width: 100%;
+            overflow: auto;
+          "
+        >
+          <div class="table-scroll">
+            <table class="preview-table" style="margin-top: 0 !important">
+              <thead>
+                <th class="th">版本</th>
+                <th class="th">关键动作</th>
+                <th class="th">当时的痛点</th>
+              </thead>
+              <tbody>
+                <tr class="tr">
+                  <td class="td">2024-11-05</td>
+                  <td class="td">
+                    首版：<code class="codespan">stdio</code> +
+                    <code class="codespan">HTTP + SSE</code> 双端点
+                  </td>
+                  <td class="td">建立最小可用协议</td>
+                </tr>
+                <tr class="tr">
+                  <td class="td">2025-03-26</td>
+                  <td class="td">
+                    废双端点，换 <strong>Streamable HTTP</strong>；引入 OAuth
+                    2.1
+                  </td>
+                  <td class="td">
+                    <code class="codespan">SSE</code>
+                    要求一条连接常驻：无服务器函数留不住，<code class="codespan"
+                      >CDN(Content Delivery Network, 内容分发网络)</code
+                    >
+                    和反向代理会缓冲或掐断，每会话一条连接导致扩容昂贵
+                  </td>
+                </tr>
+                <tr class="tr">
+                  <td class="td">2025-06-18</td>
+                  <td class="td">
+                    <strong>撤掉</strong> JSON-RPC
+                    批处理；加结构化工具输出、征询机制、<code class="codespan"
+                      >Resource Indicator</code
+                    >
+                  </td>
+                  <td class="td">
+                    批处理省下的往返，换来部分失败、超时粒度、取消传播的全套复杂度；工具只能返回纯文本，模型得从字符串里猜结构
+                  </td>
+                </tr>
+                <tr class="tr">
+                  <td class="td">2025-11-25</td>
+                  <td class="td">
+                    OIDC 发现、增量授权、实验性任务、URL 模式征询
+                  </td>
+                  <td class="td">
+                    企业已有
+                    <code class="codespan"
+                      >IdP(Identity Provider, 身份提供商)</code
+                    >
+                    不想重造；一次性索要全部权限没人敢点同意；长任务不能占着连接干等
+                  </td>
+                </tr>
+                <tr class="tr">
+                  <td class="td"><strong>2026-07-28（当前）</strong></td>
+                  <td class="td">
+                    <strong>删会话、删握手</strong
+                    >；MRTR；头路由；列表可缓存；扩展框架；授权加固
+                  </td>
+                  <td class="td">
+                    有状态等于必须粘性路由或共享存储，滚动发布与水平扩容都受限；握手在无服务器环境是纯负担
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+        <p class="p">三条能直接指导你写代码的结论：</p>
+        <ol class="ol" style="padding-left: 1.5em">
+          <li class="listitem" style="margin: 0.5em 8px">
+            1.
+            <strong>每一版都在让 MCP 更像普通 HTTP 服务</strong
+            >，而不是像一个长期保持连接的会话。2026-07-28
+            是这条路的终点：协议本身不再记得你是谁。
+          </li>
+          <li class="listitem" style="margin: 0.5em 8px">
+            2.
+            <strong>&quot;撤掉批处理&quot;是罕见的回滚</strong
+            >。它说明协议设计里&quot;省往返&quot;常常不如&quot;省复杂度&quot;。
+          </li>
+          <li class="listitem" style="margin: 0.5em 8px">
+            3.
+            <strong>废弃有 12 个月窗口</strong
+            >。规范给了正式弃用策略，所以看到旧写法不必惊讶，但新实现不该再用。
+          </li>
+        </ol>
+        <hr
+          class="hr"
+          style="
+            height: 1px;
+            border: none;
+            margin: 2em 0;
+            background: linear-gradient(
+              to right,
+              rgba(0, 0, 0, 0),
+              rgba(0, 0, 0, 0.1),
+              rgba(0, 0, 0, 0)
+            );
+          "
+        />
+        <h2
+          class="h2"
+          data-heading="true"
+          style="
+            padding: 0.3em 1.2em;
+            font-size: calc(16px * 1.3);
+            border-radius: 8px 24px 8px 24px;
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.06);
+          "
+          id="s3"
+        >
+          3. 两层结构：数据层与传输层
+        </h2>
+        <p class="p">MCP 把问题劈成两半，这是理解一切的前提。</p>
+        <pre
+          class="hljs code__pre"
+          style="border: 1px solid rgba(0, 0, 0, 0.04)"
+        ><span class="mac-sign" style="display: none; padding: 10px 14px 0;"><svg xmlns="http://www.w3.org/2000/svg" version="1.1" x="0px" y="0px" width="45px" height="13px" viewBox="0 0 450 130">
+    <ellipse cx="50" cy="65" rx="50" ry="52" stroke="rgb(220,60,54)" stroke-width="2" fill="rgb(237,108,96)"/>
+    <ellipse cx="225" cy="65" rx="50" ry="52" stroke="rgb(218,151,33)" stroke-width="2" fill="rgb(247,193,81)"/>
+    <ellipse cx="400" cy="65" rx="50" ry="52" stroke="rgb(27,161,37)" stroke-width="2" fill="rgb(100,200,86)"/>
+  </svg></span><code class="language-text" style="font-family: 'Fira Code',
+    Menlo,
+    Operator Mono,
+    Consolas,
+    Monaco,
+    monospace;">┌──────────────────────────────────────────┐<br>│&nbsp;数据层（协议语义，所有传输上完全一样）&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;│<br>│&nbsp;&nbsp;&nbsp;JSON-RPC&nbsp;2.0&nbsp;报文&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;│<br>│&nbsp;&nbsp;&nbsp;request&nbsp;/&nbsp;response&nbsp;/&nbsp;notification&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;│<br>│&nbsp;&nbsp;&nbsp;方法名:&nbsp;server/discover,&nbsp;tools/call&nbsp;...&nbsp;&nbsp;│<br>├──────────────────────────────────────────┤<br>│&nbsp;传输层（怎么把字节送过去）&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;│<br>│&nbsp;&nbsp;&nbsp;stdio&nbsp;&nbsp;|&nbsp;&nbsp;Streamable&nbsp;HTTP&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;│<br>└──────────────────────────────────────────┘</code></pre>
+        <p class="p">
+          <strong>换传输不改变报文含义</strong>。同样一条
+          <code class="codespan">tools/call</code>，走 stdio 和走 HTTP，body
+          完全一样，差别只在&quot;谁负责分帧、怎么取消、鉴权放在哪&quot;。
+        </p>
+        <h3
+          class="h3"
+          data-heading="true"
+          style="
+            padding-left: 12px;
+            font-size: calc(16px * 1.2);
+            border-radius: 6px;
+            line-height: 2.4em;
+            border-left: 4px solid #0f4c81;
+            border-right: 1px solid color-mix(in srgb, #0f4c81 10%, transparent);
+            border-bottom: 1px solid
+              color-mix(in srgb, #0f4c81 10%, transparent);
+            border-top: 1px solid color-mix(in srgb, #0f4c81 10%, transparent);
+            background: color-mix(in srgb, #0f4c81 8%, transparent);
+          "
+          id="s3-1"
+        >
+          3.1 三种消息
+        </h3>
+        <section
+          style="
+            font-family:
+              -apple-system-font,
+              BlinkMacSystemFont,
+              Helvetica Neue,
+              PingFang SC,
+              Hiragino Sans GB,
+              Microsoft YaHei UI,
+              Microsoft YaHei,
+              Arial,
+              sans-serif;
+            font-size: 16px;
+            line-height: 1.75;
+            text-align: left;
+            max-width: 100%;
+            overflow: auto;
+          "
+        >
+          <div class="table-scroll">
+            <table class="preview-table" style="margin-top: 0 !important">
+              <thead>
+                <th class="th">类型</th>
+                <th class="th">有无 <code class="codespan">id</code></th>
+                <th class="th">要不要回</th>
+                <th class="th">例子</th>
+              </thead>
+              <tbody>
+                <tr class="tr">
+                  <td class="td">Request</td>
+                  <td class="td">有，且<strong>不能为 </strong></td>
+                  <td class="td">必须回一个 response</td>
+                  <td class="td"><code class="codespan">tools/call</code></td>
+                </tr>
+                <tr class="tr">
+                  <td class="td">Response</td>
+                  <td class="td">与请求同 <code class="codespan">id</code></td>
+                  <td class="td">—</td>
+                  <td class="td">
+                    <code class="codespan">{ result }</code> 或
+                    <code class="codespan">{ error }</code>
+                  </td>
+                </tr>
+                <tr class="tr">
+                  <td class="td">Notification</td>
+                  <td class="td">没有</td>
+                  <td class="td">不回</td>
+                  <td class="td">
+                    <code class="codespan"
+                      >notifications/tools/list_changed</code
+                    >
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+        <p class="p">
+          <code class="codespan">id</code> 不能为
+          <code class="codespan">null</code> 是 MCP 对 JSON-RPC 2.0
+          的<strong>加严</strong>：标准允许
+          <code class="codespan">null</code> 表示&quot;id 读不出来&quot;，MCP
+          直接禁掉，避免客户端拿到无法对应的响应。
+        </p>
+        <h3
+          class="h3"
+          data-heading="true"
+          style="
+            padding-left: 12px;
+            font-size: calc(16px * 1.2);
+            border-radius: 6px;
+            line-height: 2.4em;
+            border-left: 4px solid #0f4c81;
+            border-right: 1px solid color-mix(in srgb, #0f4c81 10%, transparent);
+            border-bottom: 1px solid
+              color-mix(in srgb, #0f4c81 10%, transparent);
+            border-top: 1px solid color-mix(in srgb, #0f4c81 10%, transparent);
+            background: color-mix(in srgb, #0f4c81 8%, transparent);
+          "
+          id="s3-2"
+        >
+          3.2 结果必须带 <code class="codespan">resultType</code>
+        </h3>
+        <p class="p">
+          2026-07-28 起，任何 <code class="codespan">result</code> 都必须有
+          <code class="codespan">resultType</code> 字段：
+        </p>
+        <pre
+          class="hljs code__pre"
+          style="border: 1px solid rgba(0, 0, 0, 0.04)"
+        ><span class="mac-sign" style="display: none; padding: 10px 14px 0;"><svg xmlns="http://www.w3.org/2000/svg" version="1.1" x="0px" y="0px" width="45px" height="13px" viewBox="0 0 450 130">
+    <ellipse cx="50" cy="65" rx="50" ry="52" stroke="rgb(220,60,54)" stroke-width="2" fill="rgb(237,108,96)"/>
+    <ellipse cx="225" cy="65" rx="50" ry="52" stroke="rgb(218,151,33)" stroke-width="2" fill="rgb(247,193,81)"/>
+    <ellipse cx="400" cy="65" rx="50" ry="52" stroke="rgb(27,161,37)" stroke-width="2" fill="rgb(100,200,86)"/>
+  </svg></span><code class="language-json" style="font-family: 'Fira Code',
+    Menlo,
+    Operator Mono,
+    Consolas,
+    Monaco,
+    monospace;"><span class="hljs-punctuation">{</span><span class="hljs-attr"><br>&nbsp;&nbsp;&quot;jsonrpc&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-string">&nbsp;&quot;2.0&quot;</span><span class="hljs-punctuation">,</span><span class="hljs-attr"><br>&nbsp;&nbsp;&quot;id&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-number">&nbsp;1</span><span class="hljs-punctuation">,</span><span class="hljs-attr"><br>&nbsp;&nbsp;&quot;result&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-punctuation">&nbsp;{</span><span class="hljs-attr">&nbsp;&quot;resultType&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-string">&nbsp;&quot;complete&quot;</span><span class="hljs-punctuation">,</span><span class="hljs-attr">&nbsp;&quot;tools&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-punctuation">&nbsp;[</span><span class="hljs-punctuation">]</span><span class="hljs-punctuation">&nbsp;}</span><span class="hljs-punctuation"><br>}</span></code></pre>
+        <h4
+          class="h4"
+          data-heading="true"
+          style="font-size: calc(16px * 1.1); border-radius: 6px"
+        >
+          取值全集
+        </h4>
+        <section
+          style="
+            font-family:
+              -apple-system-font,
+              BlinkMacSystemFont,
+              Helvetica Neue,
+              PingFang SC,
+              Hiragino Sans GB,
+              Microsoft YaHei UI,
+              Microsoft YaHei,
+              Arial,
+              sans-serif;
+            font-size: 16px;
+            line-height: 1.75;
+            text-align: left;
+            max-width: 100%;
+            overflow: auto;
+          "
+        >
+          <div class="table-scroll">
+            <table class="preview-table" style="margin-top: 0 !important">
+              <thead>
+                <th class="th"></th>
+                <th class="th"></th>
+              </thead>
+              <tbody>
+                <tr class="tr">
+                  <td class="td">
+                    规范只定义了两个值，且类型签名是
+                    &quot;complete&quot;、&quot;input_required&quot;
+                  </td>
+                  <td class="td">
+                    <span style="color: rgb(154, 56, 215)">ResultType</span>:
+                    &quot;complete&quot;
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section
+          style="
+            font-family:
+              -apple-system-font,
+              BlinkMacSystemFont,
+              Helvetica Neue,
+              PingFang SC,
+              Hiragino Sans GB,
+              Microsoft YaHei UI,
+              Microsoft YaHei,
+              Arial,
+              sans-serif;
+            font-size: 16px;
+            line-height: 1.75;
+            text-align: left;
+            max-width: 100%;
+            overflow: auto;
+          "
+        >
+          <div class="table-scroll">
+            <table class="preview-table" style="margin-top: 0 !important">
+              <thead>
+                <th class="th">取值</th>
+                <th class="th">含义</th>
+                <th class="th">额外字段</th>
+                <th class="th">允许出现在哪些方法上</th>
+              </thead>
+              <tbody>
+                <tr class="tr">
+                  <td class="td"><code class="codespan">complete</code></td>
+                  <td class="td">
+                    请求成功完成，<code class="codespan">result</code>
+                    里就是最终内容
+                  </td>
+                  <td class="td">
+                    由方法自己决定（<code class="codespan">tools</code>、<code
+                      class="codespan"
+                      >content</code
+                    >
+                    等）
+                  </td>
+                  <td class="td">所有方法</td>
+                </tr>
+                <tr class="tr">
+                  <td class="td">
+                    <code class="codespan">input_required</code>
+                  </td>
+                  <td class="td">服务端需要客户端补充信息才能完成</td>
+                  <td class="td">
+                    <code class="codespan">inputRequests</code> 与
+                    <code class="codespan">requestState</code>，<strong
+                      >至少给一个</strong
+                    >
+                  </td>
+                  <td class="td">
+                    仅 <code class="codespan">prompts/get</code>、<code
+                      class="codespan"
+                      >resources/read</code
+                    >、<code class="codespan">tools/call</code>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+        <pre
+          class="hljs code__pre"
+          style="border: 1px solid rgba(0, 0, 0, 0.04)"
+        ><span class="mac-sign" style="display: none; padding: 10px 14px 0;"><svg xmlns="http://www.w3.org/2000/svg" version="1.1" x="0px" y="0px" width="45px" height="13px" viewBox="0 0 450 130">
+    <ellipse cx="50" cy="65" rx="50" ry="52" stroke="rgb(220,60,54)" stroke-width="2" fill="rgb(237,108,96)"/>
+    <ellipse cx="225" cy="65" rx="50" ry="52" stroke="rgb(218,151,33)" stroke-width="2" fill="rgb(247,193,81)"/>
+    <ellipse cx="400" cy="65" rx="50" ry="52" stroke="rgb(27,161,37)" stroke-width="2" fill="rgb(100,200,86)"/>
+  </svg></span><code class="language-json" style="font-family: 'Fira Code',
+    Menlo,
+    Operator Mono,
+    Consolas,
+    Monaco,
+    monospace;"><span class="hljs-punctuation">{</span><span class="hljs-attr"><br>&nbsp;&nbsp;&quot;jsonrpc&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-string">&nbsp;&quot;2.0&quot;</span><span class="hljs-punctuation">,</span><span class="hljs-attr"><br>&nbsp;&nbsp;&quot;id&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-number">&nbsp;1</span><span class="hljs-punctuation">,</span><span class="hljs-attr"><br>&nbsp;&nbsp;&quot;result&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-punctuation">&nbsp;{</span><span class="hljs-attr"><br>&nbsp;&nbsp;&nbsp;&nbsp;&quot;resultType&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-string">&nbsp;&quot;input_required&quot;</span><span class="hljs-punctuation">,</span><span class="hljs-attr"><br>&nbsp;&nbsp;&nbsp;&nbsp;&quot;inputRequests&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-punctuation">&nbsp;{</span><span class="hljs-attr"><br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&quot;which_floor&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-punctuation">&nbsp;{</span><span class="hljs-attr"><br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&quot;method&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-string">&nbsp;&quot;elicitation/create&quot;</span><span class="hljs-punctuation">,</span><span class="hljs-attr"><br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&quot;params&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-punctuation">&nbsp;{</span><span class="hljs-attr">&nbsp;&quot;mode&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-string">&nbsp;&quot;form&quot;</span><span class="hljs-punctuation">,</span><span class="hljs-attr">&nbsp;&quot;message&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-string">&nbsp;&quot;查哪一层？&quot;</span><span class="hljs-punctuation">,</span><span class="hljs-attr">&nbsp;&quot;requestedSchema&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-punctuation">&nbsp;{</span><span class="hljs-attr">&nbsp;&quot;type&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-string">&nbsp;&quot;object&quot;</span><span class="hljs-punctuation">&nbsp;}</span><span class="hljs-punctuation">&nbsp;}</span><span class="hljs-punctuation"><br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}</span><span class="hljs-punctuation"><br>&nbsp;&nbsp;&nbsp;&nbsp;}</span><span class="hljs-punctuation">,</span><span class="hljs-attr"><br>&nbsp;&nbsp;&nbsp;&nbsp;&quot;requestState&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-string">&nbsp;&quot;AEAD-protected&nbsp;blob&quot;</span><span class="hljs-punctuation"><br>&nbsp;&nbsp;}</span><span class="hljs-punctuation"><br>}</span></code></pre>
+        <h4
+          class="h4"
+          data-heading="true"
+          style="font-size: calc(16px * 1.1); border-radius: 6px"
+        >
+          五条硬规则
+        </h4>
+        <ol class="ol" style="padding-left: 1.5em">
+          <li class="listitem" style="margin: 0.5em 8px">
+            1.
+            <strong>本版服务端必须带</strong
+            >；反过来，客户端收到旧版服务端（没这个字段）的结果时，<strong
+              >必须按 处理</strong
+            >——这是唯一允许缺省的场景。
+          </li>
+          <li class="listitem" style="margin: 0.5em 8px">
+            2. <strong> 有方法白名单</strong>。除了
+            <code class="codespan">prompts/get</code>、<code class="codespan"
+              >resources/read</code
+            >、<code class="codespan">tools/call</code>
+            这三个，服务端在其他任何方法上都
+            <strong>MUST NOT</strong> 返回它。所以
+            <code class="codespan">tools/list</code>、<code class="codespan"
+              >server/discover</code
+            >
+            只能回 <code class="codespan">complete</code>。
+          </li>
+          <li class="listitem" style="margin: 0.5em 8px">
+            3. <strong> 与 至少给一个</strong>。两个都空的
+            <code class="codespan">input_required</code> 是非法的。
+          </li>
+          <li class="listitem" style="margin: 0.5em 8px">
+            4. <strong>不能请求客户端没声明过的能力</strong>。客户端
+            <code class="codespan">capabilities</code> 里没有
+            <code class="codespan">elicitation</code>，服务端就不许在
+            <code class="codespan">inputRequests</code> 里放
+            <code class="codespan">elicitation/create</code>。
+          </li>
+          <li class="listitem" style="margin: 0.5em 8px">
+            5. <strong>重试是一次全新请求</strong>：JSON-RPC
+            <code class="codespan">id</code> 必须换新的，<code class="codespan"
+              >requestState</code
+            >
+            必须原样回传（客户端不许解析它），补充的答案放
+            <code class="codespan">inputResponses</code>。
+          </li>
+        </ol>
+        <h4
+          class="h4"
+          data-heading="true"
+          style="font-size: calc(16px * 1.1); border-radius: 6px"
+        >
+          三个容易混的点
+        </h4>
+        <ul class="ul" style="list-style: none; padding-left: 1.5em">
+          <li class="listitem" style="margin: 0.5em 8px">
+            • <strong> 不是 的取值</strong>。响应只有两条互斥分支：<code
+              class="codespan"
+              >result</code
+            >
+            或 <code class="codespan">error</code>。业务失败用
+            <code class="codespan">result</code> +
+            <code class="codespan">isError: true</code>，协议失败走
+            <code class="codespan">error</code>，永远不存在
+            <code class="codespan">resultType: &quot;error&quot;</code>。
+          </li>
+          <li class="listitem" style="margin: 0.5em 8px">
+            • <strong>没有 、、 这些值</strong>。流式是传输层的 SSE 分帧，进度是
+            <code class="codespan">notifications/progress</code>
+            通知，都不是结果类型。
+          </li>
+          <li class="listitem" style="margin: 0.5em 8px">
+            •
+            <strong>遇到不认识的 怎么办</strong
+            >：因为枚举开放，客户端应当能容忍未知值；服务端则不应发明非
+            <code class="codespan">complete</code>
+            的自定义值——那等于要求客户端理解你私有的返回结构。
+          </li>
+        </ul>
+        <h4
+          class="h4"
+          data-heading="true"
+          style="font-size: calc(16px * 1.1); border-radius: 6px"
+        >
+          对本服务的含义
+        </h4>
+        <p class="p">
+          我们的 7 个工具全是&quot;查一段数据、一次给完&quot;，<strong
+            >只会返回 </strong
+          >。所以 <code class="codespan">dispatch</code> 出口统一补
+          <code class="codespan">resultType: &quot;complete&quot;</code>（见
+          <code class="codespan">src/protocol/dispatch.ts</code>），handler
+          不用各自记。
+        </p>
+        <p class="p">
+          <code class="codespan">input_required</code>
+          在我们这里没有使用场景——它解决的是&quot;参数不够时要问用户&quot;，而我们的模型调用方本来就会补齐参数；真要问，也是在工具的错误文本里说清缺什么，让模型自己重试。
+        </p>
+        <hr
+          class="hr"
+          style="
+            height: 1px;
+            border: none;
+            margin: 2em 0;
+            background: linear-gradient(
+              to right,
+              rgba(0, 0, 0, 0),
+              rgba(0, 0, 0, 0.1),
+              rgba(0, 0, 0, 0)
+            );
+          "
+        />
+        <h2
+          class="h2"
+          data-heading="true"
+          style="
+            padding: 0.3em 1.2em;
+            font-size: calc(16px * 1.3);
+            border-radius: 8px 24px 8px 24px;
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.06);
+          "
+          id="s4"
+        >
+          4. 两种传输
+        </h2>
+        <h3
+          class="h3"
+          data-heading="true"
+          style="
+            padding-left: 12px;
+            font-size: calc(16px * 1.2);
+            border-radius: 6px;
+            line-height: 2.4em;
+            border-left: 4px solid #0f4c81;
+            border-right: 1px solid color-mix(in srgb, #0f4c81 10%, transparent);
+            border-bottom: 1px solid
+              color-mix(in srgb, #0f4c81 10%, transparent);
+            border-top: 1px solid color-mix(in srgb, #0f4c81 10%, transparent);
+            background: color-mix(in srgb, #0f4c81 8%, transparent);
+          "
+          id="s4-1"
+        >
+          4.1 stdio
+        </h3>
+        <p class="p">
+          客户端把服务端当子进程拉起，报文走标准输入输出，一行一条 JSON。
+        </p>
+        <pre
+          class="hljs code__pre"
+          style="border: 1px solid rgba(0, 0, 0, 0.04)"
+        ><span class="mac-sign" style="display: none; padding: 10px 14px 0;"><svg xmlns="http://www.w3.org/2000/svg" version="1.1" x="0px" y="0px" width="45px" height="13px" viewBox="0 0 450 130">
+    <ellipse cx="50" cy="65" rx="50" ry="52" stroke="rgb(220,60,54)" stroke-width="2" fill="rgb(237,108,96)"/>
+    <ellipse cx="225" cy="65" rx="50" ry="52" stroke="rgb(218,151,33)" stroke-width="2" fill="rgb(247,193,81)"/>
+    <ellipse cx="400" cy="65" rx="50" ry="52" stroke="rgb(27,161,37)" stroke-width="2" fill="rgb(100,200,86)"/>
+  </svg></span><code class="language-text" style="font-family: 'Fira Code',
+    Menlo,
+    Operator Mono,
+    Consolas,
+    Monaco,
+    monospace;">Client&nbsp;──spawn──&gt;&nbsp;Server<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;──stdin──&gt;&nbsp;&nbsp;{&quot;jsonrpc&quot;:&quot;2.0&quot;,&quot;id&quot;:1,&quot;method&quot;:&quot;tools/list&quot;}<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&lt;──stdout──&nbsp;{&quot;jsonrpc&quot;:&quot;2.0&quot;,&quot;id&quot;:1,&quot;result&quot;:{...}}<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&lt;──stderr──&nbsp;日志（不能走&nbsp;stdout）</code></pre>
+        <p class="p">要点：</p>
+        <ul class="ul" style="list-style: none; padding-left: 1.5em">
+          <li class="listitem" style="margin: 0.5em 8px">
+            • <strong> 只能放协议消息，日志必须走 </strong>。<code
+              class="codespan"
+              >console.log</code
+            >
+            打一行调试信息，客户端就收到非法 JSON 并断开——这是 stdio
+            实现失败率最高的原因
+          </li>
+          <li class="listitem" style="margin: 0.5em 8px">
+            •
+            管道天然独占，一个客户端一个进程，<strong>并发问题自动消失</strong>，但两个客户端看到的是两份独立状态
+          </li>
+          <li class="listitem" style="margin: 0.5em 8px">
+            • 继承宿主的工作目录、环境变量和文件权限，<strong
+              >不需要另做鉴权</strong
+            >
+          </li>
+        </ul>
+        <h3
+          class="h3"
+          data-heading="true"
+          style="
+            padding-left: 12px;
+            font-size: calc(16px * 1.2);
+            border-radius: 6px;
+            line-height: 2.4em;
+            border-left: 4px solid #0f4c81;
+            border-right: 1px solid color-mix(in srgb, #0f4c81 10%, transparent);
+            border-bottom: 1px solid
+              color-mix(in srgb, #0f4c81 10%, transparent);
+            border-top: 1px solid color-mix(in srgb, #0f4c81 10%, transparent);
+            background: color-mix(in srgb, #0f4c81 8%, transparent);
+          "
+          id="s4-2"
+        >
+          4.2 Streamable HTTP
+        </h3>
+        <p class="p">
+          单个端点，每次 <strong>POST</strong>，响应可以是 JSON 或请求作用域的
+          SSE 流。
+        </p>
+        <pre
+          class="hljs code__pre"
+          style="border: 1px solid rgba(0, 0, 0, 0.04)"
+        ><span class="mac-sign" style="display: none; padding: 10px 14px 0;"><svg xmlns="http://www.w3.org/2000/svg" version="1.1" x="0px" y="0px" width="45px" height="13px" viewBox="0 0 450 130">
+    <ellipse cx="50" cy="65" rx="50" ry="52" stroke="rgb(220,60,54)" stroke-width="2" fill="rgb(237,108,96)"/>
+    <ellipse cx="225" cy="65" rx="50" ry="52" stroke="rgb(218,151,33)" stroke-width="2" fill="rgb(247,193,81)"/>
+    <ellipse cx="400" cy="65" rx="50" ry="52" stroke="rgb(27,161,37)" stroke-width="2" fill="rgb(100,200,86)"/>
+  </svg></span><code class="language-text" style="font-family: 'Fira Code',
+    Menlo,
+    Operator Mono,
+    Consolas,
+    Monaco,
+    monospace;">Client&nbsp;──POST&nbsp;/mcp──&gt;&nbsp;Server<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&lt;──application/json──&nbsp;一问一答<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;或<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&lt;──text/event-stream──&nbsp;边算边推（可选）</code></pre>
+        <p class="p">要点：</p>
+        <ul class="ul" style="list-style: none; padding-left: 1.5em">
+          <li class="listitem" style="margin: 0.5em 8px">
+            • 名字里的 &quot;Streamable&quot;
+            意思是<strong>需要流才流</strong>，不是强制长连接。绝大多数调用是一问一答
+          </li>
+          <li class="listitem" style="margin: 0.5em 8px">
+            • 2026-07-28
+            起不再有协议级会话，<strong>任何请求可以落到任何实例</strong>，普通轮询负载均衡即可
+          </li>
+          <li class="listitem" style="margin: 0.5em 8px">
+            • 暴露到网络就必须处理鉴权（规范推荐 OAuth 2.1，2026 版还加了 RFC
+            9207 issuer 校验、从动态注册转向 CIMD 客户端元数据文档）
+          </li>
+        </ul>
+        <h3
+          class="h3"
+          data-heading="true"
+          style="
+            padding-left: 12px;
+            font-size: calc(16px * 1.2);
+            border-radius: 6px;
+            line-height: 2.4em;
+            border-left: 4px solid #0f4c81;
+            border-right: 1px solid color-mix(in srgb, #0f4c81 10%, transparent);
+            border-bottom: 1px solid
+              color-mix(in srgb, #0f4c81 10%, transparent);
+            border-top: 1px solid color-mix(in srgb, #0f4c81 10%, transparent);
+            background: color-mix(in srgb, #0f4c81 8%, transparent);
+          "
+          id="s4-3"
+        >
+          4.3 对比
+        </h3>
+        <section
+          style="
+            font-family:
+              -apple-system-font,
+              BlinkMacSystemFont,
+              Helvetica Neue,
+              PingFang SC,
+              Hiragino Sans GB,
+              Microsoft YaHei UI,
+              Microsoft YaHei,
+              Arial,
+              sans-serif;
+            font-size: 16px;
+            line-height: 1.75;
+            text-align: left;
+            max-width: 100%;
+            overflow: auto;
+          "
+        >
+          <div class="table-scroll">
+            <table class="preview-table" style="margin-top: 0 !important">
+              <thead>
+                <th class="th">维度</th>
+                <th class="th">stdio</th>
+                <th class="th">Streamable HTTP</th>
+              </thead>
+              <tbody>
+                <tr class="tr">
+                  <td class="td">通信范围</td>
+                  <td class="td">同机父子进程</td>
+                  <td class="td">任意网络</td>
+                </tr>
+                <tr class="tr">
+                  <td class="td">谁启动</td>
+                  <td class="td">客户端自动拉起</td>
+                  <td class="td">需自行常驻运维</td>
+                </tr>
+                <tr class="tr">
+                  <td class="td">鉴权成本</td>
+                  <td class="td">零（继承系统权限）</td>
+                  <td class="td">高</td>
+                </tr>
+                <tr class="tr">
+                  <td class="td">并发模型</td>
+                  <td class="td">天然独占</td>
+                  <td class="td">需自行处理</td>
+                </tr>
+                <tr class="tr">
+                  <td class="td">状态持有</td>
+                  <td class="td">进程内存即状态</td>
+                  <td class="td">2026-07-28 起必须无状态</td>
+                </tr>
+                <tr class="tr">
+                  <td class="td">冷启动</td>
+                  <td class="td">每次连接重启进程</td>
+                  <td class="td">常驻，无冷启动</td>
+                </tr>
+                <tr class="tr">
+                  <td class="td">传大结果</td>
+                  <td class="td">管道直传</td>
+                  <td class="td">受超时、体积、代理限制</td>
+                </tr>
+                <tr class="tr">
+                  <td class="td">团队共享</td>
+                  <td class="td">做不到</td>
+                  <td class="td">唯一选择</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+        <p class="p">
+          一句话记法：<strong
+            >stdio 是&quot;插件&quot;，Streamable HTTP
+            是&quot;服务&quot;。</strong
+          >
+        </p>
+        <h3
+          class="h3"
+          data-heading="true"
+          style="
+            padding-left: 12px;
+            font-size: calc(16px * 1.2);
+            border-radius: 6px;
+            line-height: 2.4em;
+            border-left: 4px solid #0f4c81;
+            border-right: 1px solid color-mix(in srgb, #0f4c81 10%, transparent);
+            border-bottom: 1px solid
+              color-mix(in srgb, #0f4c81 10%, transparent);
+            border-top: 1px solid color-mix(in srgb, #0f4c81 10%, transparent);
+            background: color-mix(in srgb, #0f4c81 8%, transparent);
+          "
+          id="s4-4"
+        >
+          4.4 为什么只能 POST
+        </h3>
+        <p class="p">
+          MCP 在传输层是
+          <strong>RPC(Remote Procedure Call, 远程过程调用)</strong> 风格，不是
+          <strong>REST(Representational State Transfer, 表述性状态转移)</strong>
+          风格。REST 把&quot;要做什么&quot;编码在 URL 和 HTTP 动词里；RPC
+          把&quot;要做什么&quot;编码在 body 的
+          <code class="codespan">method</code> 字段里。MCP
+          选了后者，所以只有一个端点。
+        </p>
+        <section
+          style="
+            font-family:
+              -apple-system-font,
+              BlinkMacSystemFont,
+              Helvetica Neue,
+              PingFang SC,
+              Hiragino Sans GB,
+              Microsoft YaHei UI,
+              Microsoft YaHei,
+              Arial,
+              sans-serif;
+            font-size: 16px;
+            line-height: 1.75;
+            text-align: left;
+            max-width: 100%;
+            overflow: auto;
+          "
+        >
+          <div class="table-scroll">
+            <table class="preview-table" style="margin-top: 0 !important">
+              <thead>
+                <th class="th">方法</th>
+                <th class="th">为什么不用</th>
+              </thead>
+              <tbody>
+                <tr class="tr">
+                  <td class="td">GET</td>
+                  <td class="td">
+                    语义上必须安全且幂等，意味着可被缓存、可被预取、可被代理重放
+                  </td>
+                </tr>
+                <tr class="tr">
+                  <td class="td">PUT / PATCH</td>
+                  <td class="td">
+                    语义是修改资源，用来描述一次查询是错位，还会误导网关审计规则
+                  </td>
+                </tr>
+                <tr class="tr">
+                  <td class="td">DELETE</td>
+                  <td class="td">
+                    旧代用来终止会话，2026-07-28 删掉会话后打过去是
+                    <code class="codespan">405</code>
+                  </td>
+                </tr>
+                <tr class="tr">
+                  <td class="td">WebSocket</td>
+                  <td class="td">
+                    要协议升级、要连接常驻、要粘性路由，等于把刚去掉的有状态性加回来
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+        <p class="p">
+          <strong>一个反直觉的点：只读查询也不该用 GET。</strong> HTTP 缓存按
+          URL 做键，一旦 <code class="codespan">tools/call</code> 能通过 GET
+          访问，共享缓存或企业代理可能把第一个人的查询结果返回给第二个人。POST
+          的响应默认不可缓存，天然避开。
+        </p>
+        <p class="p">
+          好处是：<strong>鉴权、限流、审计、错误映射只需要写一次</strong>，加新工具不动路由。
+        </p>
+        <h3
+          class="h3"
+          data-heading="true"
+          style="
+            padding-left: 12px;
+            font-size: calc(16px * 1.2);
+            border-radius: 6px;
+            line-height: 2.4em;
+            border-left: 4px solid #0f4c81;
+            border-right: 1px solid color-mix(in srgb, #0f4c81 10%, transparent);
+            border-bottom: 1px solid
+              color-mix(in srgb, #0f4c81 10%, transparent);
+            border-top: 1px solid color-mix(in srgb, #0f4c81 10%, transparent);
+            background: color-mix(in srgb, #0f4c81 8%, transparent);
+          "
+          id="s4-5"
+        >
+          4.5 传输层硬性要求（2026-07-28）
+        </h3>
+        <p class="p">这几条是新手最容易漏的，漏了客户端直接连不上。</p>
+        <section
+          style="
+            font-family:
+              -apple-system-font,
+              BlinkMacSystemFont,
+              Helvetica Neue,
+              PingFang SC,
+              Hiragino Sans GB,
+              Microsoft YaHei UI,
+              Microsoft YaHei,
+              Arial,
+              sans-serif;
+            font-size: 16px;
+            line-height: 1.75;
+            text-align: left;
+            max-width: 100%;
+            overflow: auto;
+          "
+        >
+          <div class="table-scroll">
+            <table class="preview-table" style="margin-top: 0 !important">
+              <thead>
+                <th class="th">项</th>
+                <th class="th">要求</th>
+                <th class="th">违反的后果</th>
+              </thead>
+              <tbody>
+                <tr class="tr">
+                  <td class="td">
+                    <code class="codespan">MCP-Protocol-Version</code> 头
+                  </td>
+                  <td class="td">
+                    所有 POST 必带，值与 body
+                    <code class="codespan">_meta</code> 中的版本一致
+                  </td>
+                  <td class="td">
+                    <code class="codespan">400</code> +
+                    <code class="codespan">-32020</code>
+                  </td>
+                </tr>
+                <tr class="tr">
+                  <td class="td">
+                    <code class="codespan">Mcp-Method</code> 头
+                  </td>
+                  <td class="td">
+                    所有 POST 必带，值为 body 的
+                    <code class="codespan">method</code>
+                  </td>
+                  <td class="td">
+                    <code class="codespan">400</code> +
+                    <code class="codespan">-32020</code>
+                  </td>
+                </tr>
+                <tr class="tr">
+                  <td class="td"><code class="codespan">Mcp-Name</code> 头</td>
+                  <td class="td">
+                    <code class="codespan">tools/call</code>、<code
+                      class="codespan"
+                      >resources/read</code
+                    >、<code class="codespan">prompts/get</code> 必带，值为
+                    <code class="codespan">params.name</code> 或
+                    <code class="codespan">params.uri</code>
+                  </td>
+                  <td class="td">
+                    <code class="codespan">400</code> +
+                    <code class="codespan">-32020</code>
+                  </td>
+                </tr>
+                <tr class="tr">
+                  <td class="td"><code class="codespan">Accept</code> 头</td>
+                  <td class="td">
+                    客户端应同时列出
+                    <code class="codespan">application/json</code> 与
+                    <code class="codespan">text/event-stream</code>
+                  </td>
+                  <td class="td">服务端可能拒</td>
+                </tr>
+                <tr class="tr">
+                  <td class="td">
+                    <code class="codespan">_meta</code> 必填字段
+                  </td>
+                  <td class="td">
+                    <code class="codespan">protocolVersion</code> 与
+                    <code class="codespan">clientCapabilities</code>
+                  </td>
+                  <td class="td">
+                    <code class="codespan">400</code> +
+                    <code class="codespan">-32602</code>
+                  </td>
+                </tr>
+                <tr class="tr">
+                  <td class="td"><code class="codespan">Origin</code> 校验</td>
+                  <td class="td">服务端必须校验</td>
+                  <td class="td">无效时 <code class="codespan">403</code></td>
+                </tr>
+                <tr class="tr">
+                  <td class="td">
+                    <code class="codespan">GET</code> /
+                    <code class="codespan">DELETE</code> 到端点
+                  </td>
+                  <td class="td">不支持</td>
+                  <td class="td"><code class="codespan">405</code></td>
+                </tr>
+                <tr class="tr">
+                  <td class="td">无 <code class="codespan">id</code> 的通知</td>
+                  <td class="td">受理</td>
+                  <td class="td">
+                    <code class="codespan">202</code>，无响应体
+                  </td>
+                </tr>
+                <tr class="tr">
+                  <td class="td">
+                    <code class="codespan">Mcp-Session-Id</code>
+                  </td>
+                  <td class="td">收到就忽略，不生成也不回显</td>
+                  <td class="td">—</td>
+                </tr>
+                <tr class="tr">
+                  <td class="td">取消</td>
+                  <td class="td">客户端关闭响应流</td>
+                  <td class="td">服务端应停止处理且不再发消息</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+        <p class="p">
+          <code class="codespan">Mcp-Method</code> /
+          <code class="codespan">Mcp-Name</code> 是 2026-07-28
+          新增的<strong>路由头</strong>，目的是让网关、限流器、WAF 不解析 body
+          就能识别调用。<strong>2025 年的教程里没有这两个头。</strong>
+        </p>
+        <hr
+          class="hr"
+          style="
+            height: 1px;
+            border: none;
+            margin: 2em 0;
+            background: linear-gradient(
+              to right,
+              rgba(0, 0, 0, 0),
+              rgba(0, 0, 0, 0.1),
+              rgba(0, 0, 0, 0)
+            );
+          "
+        />
+        <h2
+          class="h2"
+          data-heading="true"
+          style="
+            padding: 0.3em 1.2em;
+            font-size: calc(16px * 1.3);
+            border-radius: 8px 24px 8px 24px;
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.06);
+          "
+          id="s5"
+        >
+          5. 原语（primitives）
+        </h2>
+        <p class="p">
+          &quot;原语&quot;是协议设计里的常用词，指<strong>最小的、不可再分的构建单元</strong>。协议只定义几种零件，复杂行为由它们组合出来。
+        </p>
+        <p class="p">
+          MCP 的原语有个特别之处：<strong
+            >按&quot;控制权归谁&quot;划分，而不是按功能。</strong
+          >
+        </p>
+        <section
+          style="
+            font-family:
+              -apple-system-font,
+              BlinkMacSystemFont,
+              Helvetica Neue,
+              PingFang SC,
+              Hiragino Sans GB,
+              Microsoft YaHei UI,
+              Microsoft YaHei,
+              Arial,
+              sans-serif;
+            font-size: 16px;
+            line-height: 1.75;
+            text-align: left;
+            max-width: 100%;
+            overflow: auto;
+          "
+        >
+          <div class="table-scroll">
+            <table class="preview-table" style="margin-top: 0 !important">
+              <thead>
+                <th class="th">原语</th>
+                <th class="th">谁提供</th>
+                <th class="th">谁决定何时用</th>
+                <th class="th">类比</th>
+              </thead>
+              <tbody>
+                <tr class="tr">
+                  <td class="td"><strong>Tools</strong></td>
+                  <td class="td">服务端</td>
+                  <td class="td"><strong>模型</strong>自主决定</td>
+                  <td class="td">函数调用</td>
+                </tr>
+                <tr class="tr">
+                  <td class="td"><strong>Resources</strong></td>
+                  <td class="td">服务端</td>
+                  <td class="td"><strong>应用/客户端</strong>决定</td>
+                  <td class="td">文件、只读数据</td>
+                </tr>
+                <tr class="tr">
+                  <td class="td"><strong>Prompts</strong></td>
+                  <td class="td">服务端</td>
+                  <td class="td"><strong>用户</strong>主动选</td>
+                  <td class="td">斜杠命令</td>
+                </tr>
+                <tr class="tr">
+                  <td class="td"><strong>Elicitation</strong></td>
+                  <td class="td">客户端</td>
+                  <td class="td">服务端请求用户补充</td>
+                  <td class="td">弹窗问一句</td>
+                </tr>
+                <tr class="tr">
+                  <td class="td"><strong>Subscriptions</strong></td>
+                  <td class="td">服务端</td>
+                  <td class="td">客户端订阅通知</td>
+                  <td class="td">变更推送</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+        <p class="p">
+          两个已废弃：<strong>Sampling</strong>（服务端借用宿主模型）与
+          <strong>Logging</strong>（服务端向客户端发日志），2026-07-28
+          起不建议新实现使用，前者改为直接调用模型厂商接口，后者改为写
+          <code class="codespan">stderr</code> 或 OpenTelemetry。
+        </p>
+        <h3
+          class="h3"
+          data-heading="true"
+          style="
+            padding-left: 12px;
+            font-size: calc(16px * 1.2);
+            border-radius: 6px;
+            line-height: 2.4em;
+            border-left: 4px solid #0f4c81;
+            border-right: 1px solid color-mix(in srgb, #0f4c81 10%, transparent);
+            border-bottom: 1px solid
+              color-mix(in srgb, #0f4c81 10%, transparent);
+            border-top: 1px solid color-mix(in srgb, #0f4c81 10%, transparent);
+            background: color-mix(in srgb, #0f4c81 8%, transparent);
+          "
+          id="s5-1"
+        >
+          5.1 为什么非要这样分
+        </h3>
+        <p class="p">
+          因为如果只按功能划分，所有东西都能做成 Tool。MCP
+          偏要拆开，理由是：<strong
+            >每次 Tool 调用，模型都要做一次决策、消耗一次上下文；而 Resource
+            是&quot;摆在那儿的材料&quot;，应用可以直接塞进上下文，模型不用做决定。</strong
+          >
+        </p>
+        <p class="p">
+          具体到一个例子：你想给模型一份&quot;这个数据集的高频属性名清单&quot;。
+        </p>
+        <ul class="ul" style="list-style: none; padding-left: 1.5em">
+          <li class="listitem" style="margin: 0.5em 8px">
+            • 做成 Tool
+            <code class="codespan">get_manual</code
+            >：模型得先想到&quot;我该去取手册&quot;，再调一次。<strong>它可能根本想不到</strong>，于是继续瞎猜字段名。
+          </li>
+          <li class="listitem" style="margin: 0.5em 8px">
+            • 做成 Resource
+            <code class="codespan">parquet://manual/properties</code
+            >：客户端可在会话开始时就加载，或模型需要时直接读，没有&quot;要不要用&quot;的决策负担。
+          </li>
+        </ul>
+        <p class="p">
+          反向也成立：需要<strong>执行</strong>的动作不能做成 Resource，Resource
+          是只读的，没有执行语义。
+        </p>
+        <hr
+          class="hr"
+          style="
+            height: 1px;
+            border: none;
+            margin: 2em 0;
+            background: linear-gradient(
+              to right,
+              rgba(0, 0, 0, 0),
+              rgba(0, 0, 0, 0.1),
+              rgba(0, 0, 0, 0)
+            );
+          "
+        />
+        <h2
+          class="h2"
+          data-heading="true"
+          style="
+            padding: 0.3em 1.2em;
+            font-size: calc(16px * 1.3);
+            border-radius: 8px 24px 8px 24px;
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.06);
+          "
+          id="s6"
+        >
+          6. 方法命名
+        </h2>
+        <h3
+          class="h3"
+          data-heading="true"
+          style="
+            padding-left: 12px;
+            font-size: calc(16px * 1.2);
+            border-radius: 6px;
+            line-height: 2.4em;
+            border-left: 4px solid #0f4c81;
+            border-right: 1px solid color-mix(in srgb, #0f4c81 10%, transparent);
+            border-bottom: 1px solid
+              color-mix(in srgb, #0f4c81 10%, transparent);
+            border-top: 1px solid color-mix(in srgb, #0f4c81 10%, transparent);
+            background: color-mix(in srgb, #0f4c81 8%, transparent);
+          "
+          id="s6-1"
+        >
+          6.1 是约定，不是随手起
+        </h3>
+        <p class="p">
+          <code class="codespan">tools/list</code>、<code class="codespan"
+            >tools/call</code
+          >
+          这些<strong
+            >不是可自定义的名字，是规范硬编码的 JSON-RPC
+            方法名，一个字母都不能改。</strong
+          >
+        </p>
+        <pre
+          class="hljs code__pre"
+          style="border: 1px solid rgba(0, 0, 0, 0.04)"
+        ><span class="mac-sign" style="display: none; padding: 10px 14px 0;"><svg xmlns="http://www.w3.org/2000/svg" version="1.1" x="0px" y="0px" width="45px" height="13px" viewBox="0 0 450 130">
+    <ellipse cx="50" cy="65" rx="50" ry="52" stroke="rgb(220,60,54)" stroke-width="2" fill="rgb(237,108,96)"/>
+    <ellipse cx="225" cy="65" rx="50" ry="52" stroke="rgb(218,151,33)" stroke-width="2" fill="rgb(247,193,81)"/>
+    <ellipse cx="400" cy="65" rx="50" ry="52" stroke="rgb(27,161,37)" stroke-width="2" fill="rgb(100,200,86)"/>
+  </svg></span><code class="language-text" style="font-family: 'Fira Code',
+    Menlo,
+    Operator Mono,
+    Consolas,
+    Monaco,
+    monospace;">JSON-RPC&nbsp;method:&nbsp;&quot;tools/call&quot;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;←&nbsp;协议规定，固定<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;params.name:&nbsp;&quot;filter_rows&quot;&nbsp;&nbsp;←&nbsp;你起的工具名，规范不关心<br>&nbsp;&nbsp;params.arguments:&nbsp;{&nbsp;...&nbsp;}&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;←&nbsp;你定的参数</code></pre>
+        <p class="p">
+          模型通过
+          <code class="codespan">tools/list</code>
+          知道你有哪些工具，但调用时走的永远是
+          <code class="codespan">tools/call</code> 这个通道。<strong
+            >无论你有一百个工具还是一个，方法名只有一个。</strong
+          >
+        </p>
+        <h3
+          class="h3"
+          data-heading="true"
+          style="
+            padding-left: 12px;
+            font-size: calc(16px * 1.2);
+            border-radius: 6px;
+            line-height: 2.4em;
+            border-left: 4px solid #0f4c81;
+            border-right: 1px solid color-mix(in srgb, #0f4c81 10%, transparent);
+            border-bottom: 1px solid
+              color-mix(in srgb, #0f4c81 10%, transparent);
+            border-top: 1px solid color-mix(in srgb, #0f4c81 10%, transparent);
+            background: color-mix(in srgb, #0f4c81 8%, transparent);
+          "
+          id="s6-2"
+        >
+          6.2 格式规律
+        </h3>
+        <ul class="ul" style="list-style: none; padding-left: 1.5em">
+          <li class="listitem" style="margin: 0.5em 8px">
+            • 结构固定为
+            <code class="codespan">对象/动作</code>，斜杠分隔，<strong
+              >对象常用复数</strong
+            >
+          </li>
+          <li class="listitem" style="margin: 0.5em 8px">
+            • 动作用小写：<code class="codespan">list</code>、<code
+              class="codespan"
+              >call</code
+            >、<code class="codespan">read</code>、<code class="codespan"
+              >get</code
+            >
+          </li>
+          <li class="listitem" style="margin: 0.5em 8px">
+            • <strong>大小写敏感</strong>，<code class="codespan"
+              >Tools/List</code
+            >
+            无效
+          </li>
+          <li class="listitem" style="margin: 0.5em 8px">
+            • 通知以 <code class="codespan">notifications/</code> 开头
+          </li>
+        </ul>
+        <h3
+          class="h3"
+          data-heading="true"
+          style="
+            padding-left: 12px;
+            font-size: calc(16px * 1.2);
+            border-radius: 6px;
+            line-height: 2.4em;
+            border-left: 4px solid #0f4c81;
+            border-right: 1px solid color-mix(in srgb, #0f4c81 10%, transparent);
+            border-bottom: 1px solid
+              color-mix(in srgb, #0f4c81 10%, transparent);
+            border-top: 1px solid color-mix(in srgb, #0f4c81 10%, transparent);
+            background: color-mix(in srgb, #0f4c81 8%, transparent);
+          "
+          id="s6-3"
+        >
+          6.3 完整方法清单
+        </h3>
+        <section
+          style="
+            font-family:
+              -apple-system-font,
+              BlinkMacSystemFont,
+              Helvetica Neue,
+              PingFang SC,
+              Hiragino Sans GB,
+              Microsoft YaHei UI,
+              Microsoft YaHei,
+              Arial,
+              sans-serif;
+            font-size: 16px;
+            line-height: 1.75;
+            text-align: left;
+            max-width: 100%;
+            overflow: auto;
+          "
+        >
+          <div class="table-scroll">
+            <table class="preview-table" style="margin-top: 0 !important">
+              <thead>
+                <th class="th">原语</th>
+                <th class="th">方法</th>
+                <th class="th">谁实现</th>
+              </thead>
+              <tbody>
+                <tr class="tr">
+                  <td class="td">Discovery</td>
+                  <td class="td">
+                    <code class="codespan">server/discover</code>
+                  </td>
+                  <td class="td">服务端（<strong>必须</strong>）</td>
+                </tr>
+                <tr class="tr">
+                  <td class="td">Tools</td>
+                  <td class="td">
+                    <code class="codespan">tools/list</code>、<code
+                      class="codespan"
+                      >tools/call</code
+                    >
+                  </td>
+                  <td class="td">服务端</td>
+                </tr>
+                <tr class="tr">
+                  <td class="td">Resources</td>
+                  <td class="td">
+                    <code class="codespan">resources/list</code>、<code
+                      class="codespan"
+                      >resources/read</code
+                    >、<code class="codespan">resources/templates/list</code>
+                  </td>
+                  <td class="td">服务端</td>
+                </tr>
+                <tr class="tr">
+                  <td class="td">Prompts</td>
+                  <td class="td">
+                    <code class="codespan">prompts/list</code>、<code
+                      class="codespan"
+                      >prompts/get</code
+                    >
+                  </td>
+                  <td class="td">服务端</td>
+                </tr>
+                <tr class="tr">
+                  <td class="td">Subscriptions</td>
+                  <td class="td">
+                    <code class="codespan">subscriptions/listen</code>
+                  </td>
+                  <td class="td">服务端</td>
+                </tr>
+                <tr class="tr">
+                  <td class="td">Utilities</td>
+                  <td class="td">
+                    <code class="codespan">completion/complete</code>
+                  </td>
+                  <td class="td">可选</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+        <p class="p">
+          一个数据库类服务端，实际只需要写 5 个方法：<code class="codespan"
+            >server/discover</code
+          >、<code class="codespan">tools/list</code>、<code class="codespan"
+            >tools/call</code
+          >、<code class="codespan">resources/list</code>、<code
+            class="codespan"
+            >resources/read</code
+          >。
+        </p>
+        <h3
+          class="h3"
+          data-heading="true"
+          style="
+            padding-left: 12px;
+            font-size: calc(16px * 1.2);
+            border-radius: 6px;
+            line-height: 2.4em;
+            border-left: 4px solid #0f4c81;
+            border-right: 1px solid color-mix(in srgb, #0f4c81 10%, transparent);
+            border-bottom: 1px solid
+              color-mix(in srgb, #0f4c81 10%, transparent);
+            border-top: 1px solid color-mix(in srgb, #0f4c81 10%, transparent);
+            background: color-mix(in srgb, #0f4c81 8%, transparent);
+          "
+          id="s6-4"
+        >
+          6.4 工具名本身的约定
+        </h3>
+        <p class="p">
+          规范不强制，但社区惯例是
+          <code class="codespan">snake_case</code
+          >，动词开头。名字要能被模型&quot;望文生义&quot;，并且<strong>同族工具后缀对称</strong>——<code
+            class="codespan"
+            >get_digest_value</code
+          >
+          与
+          <code class="codespan">get_full_value</code>
+          放在一起，模型立刻知道是同一个值的两种粒度；若写成
+          <code class="codespan">get_digest</code> 与
+          <code class="codespan">get_full_value</code>，一个带
+          <code class="codespan">value</code>
+          一个不带，它会犹豫这两个是不是一类东西。
+        </p>
+        <hr
+          class="hr"
+          style="
+            height: 1px;
+            border: none;
+            margin: 2em 0;
+            background: linear-gradient(
+              to right,
+              rgba(0, 0, 0, 0),
+              rgba(0, 0, 0, 0.1),
+              rgba(0, 0, 0, 0)
+            );
+          "
+        />
+        <h2
+          class="h2"
+          data-heading="true"
+          style="
+            padding: 0.3em 1.2em;
+            font-size: calc(16px * 1.3);
+            border-radius: 8px 24px 8px 24px;
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.06);
+          "
+          id="s7"
+        >
+          7. 一次完整调用长什么样
+        </h2>
+        <p class="p">
+          下面三段是 2026-07-28 的写法。注意每个请求都带了四个头，body 里有
+          <code class="codespan">_meta</code>。
+        </p>
+        <h3
+          class="h3"
+          data-heading="true"
+          style="
+            padding-left: 12px;
+            font-size: calc(16px * 1.2);
+            border-radius: 6px;
+            line-height: 2.4em;
+            border-left: 4px solid #0f4c81;
+            border-right: 1px solid color-mix(in srgb, #0f4c81 10%, transparent);
+            border-bottom: 1px solid
+              color-mix(in srgb, #0f4c81 10%, transparent);
+            border-top: 1px solid color-mix(in srgb, #0f4c81 10%, transparent);
+            background: color-mix(in srgb, #0f4c81 8%, transparent);
+          "
+          id="s7-1"
+        >
+          7.1 发现
+        </h3>
+        <pre
+          class="hljs code__pre"
+          style="border: 1px solid rgba(0, 0, 0, 0.04)"
+        ><span class="mac-sign" style="display: none; padding: 10px 14px 0;"><svg xmlns="http://www.w3.org/2000/svg" version="1.1" x="0px" y="0px" width="45px" height="13px" viewBox="0 0 450 130">
+    <ellipse cx="50" cy="65" rx="50" ry="52" stroke="rgb(220,60,54)" stroke-width="2" fill="rgb(237,108,96)"/>
+    <ellipse cx="225" cy="65" rx="50" ry="52" stroke="rgb(218,151,33)" stroke-width="2" fill="rgb(247,193,81)"/>
+    <ellipse cx="400" cy="65" rx="50" ry="52" stroke="rgb(27,161,37)" stroke-width="2" fill="rgb(100,200,86)"/>
+  </svg></span><code class="language-bash" style="font-family: 'Fira Code',
+    Menlo,
+    Operator Mono,
+    Consolas,
+    Monaco,
+    monospace;">curl&nbsp;-sS&nbsp;-X&nbsp;POST&nbsp;http://127.0.0.1:8788/mcp&nbsp;\<br>&nbsp;&nbsp;-H<span class="hljs-string">&nbsp;&#x27;Authorization:&nbsp;Bearer&nbsp;dev-token&#x27;</span>&nbsp;\<br>&nbsp;&nbsp;-H<span class="hljs-string">&nbsp;&#x27;Content-Type:&nbsp;application/json&#x27;</span>&nbsp;\<br>&nbsp;&nbsp;-H<span class="hljs-string">&nbsp;&#x27;Accept:&nbsp;application/json,&nbsp;text/event-stream&#x27;</span>&nbsp;\<br>&nbsp;&nbsp;-H<span class="hljs-string">&nbsp;&#x27;MCP-Protocol-Version:&nbsp;2026-07-28&#x27;</span>&nbsp;\<br>&nbsp;&nbsp;-H<span class="hljs-string">&nbsp;&#x27;Mcp-Method:&nbsp;server/discover&#x27;</span>&nbsp;\<br>&nbsp;&nbsp;-d<span class="hljs-string">&nbsp;&#x27;{<br>&nbsp;&nbsp;&nbsp;&nbsp;&quot;jsonrpc&quot;:&nbsp;&quot;2.0&quot;,<br>&nbsp;&nbsp;&nbsp;&nbsp;&quot;id&quot;:&nbsp;1,<br>&nbsp;&nbsp;&nbsp;&nbsp;&quot;method&quot;:&nbsp;&quot;server/discover&quot;,<br>&nbsp;&nbsp;&nbsp;&nbsp;&quot;params&quot;:&nbsp;{<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&quot;_meta&quot;:&nbsp;{<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&quot;io.modelcontextprotocol/protocolVersion&quot;:&nbsp;&quot;2026-07-28&quot;,<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&quot;io.modelcontextprotocol/clientInfo&quot;:&nbsp;{&nbsp;&quot;name&quot;:&nbsp;&quot;curl&quot;,&nbsp;&quot;version&quot;:&nbsp;&quot;1.0&quot;&nbsp;},<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&quot;io.modelcontextprotocol/clientCapabilities&quot;:&nbsp;{}<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br>&nbsp;&nbsp;&nbsp;&nbsp;}<br>&nbsp;&nbsp;}&#x27;</span></code></pre>
+        <p class="p">响应：</p>
+        <pre
+          class="hljs code__pre"
+          style="border: 1px solid rgba(0, 0, 0, 0.04)"
+        ><span class="mac-sign" style="display: none; padding: 10px 14px 0;"><svg xmlns="http://www.w3.org/2000/svg" version="1.1" x="0px" y="0px" width="45px" height="13px" viewBox="0 0 450 130">
+    <ellipse cx="50" cy="65" rx="50" ry="52" stroke="rgb(220,60,54)" stroke-width="2" fill="rgb(237,108,96)"/>
+    <ellipse cx="225" cy="65" rx="50" ry="52" stroke="rgb(218,151,33)" stroke-width="2" fill="rgb(247,193,81)"/>
+    <ellipse cx="400" cy="65" rx="50" ry="52" stroke="rgb(27,161,37)" stroke-width="2" fill="rgb(100,200,86)"/>
+  </svg></span><code class="language-json" style="font-family: 'Fira Code',
+    Menlo,
+    Operator Mono,
+    Consolas,
+    Monaco,
+    monospace;"><span class="hljs-punctuation">{</span><span class="hljs-attr"><br>&nbsp;&nbsp;&quot;jsonrpc&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-string">&nbsp;&quot;2.0&quot;</span><span class="hljs-punctuation">,</span><span class="hljs-attr"><br>&nbsp;&nbsp;&quot;id&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-number">&nbsp;1</span><span class="hljs-punctuation">,</span><span class="hljs-attr"><br>&nbsp;&nbsp;&quot;result&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-punctuation">&nbsp;{</span><span class="hljs-attr"><br>&nbsp;&nbsp;&nbsp;&nbsp;&quot;resultType&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-string">&nbsp;&quot;complete&quot;</span><span class="hljs-punctuation">,</span><span class="hljs-attr"><br>&nbsp;&nbsp;&nbsp;&nbsp;&quot;supportedVersions&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-punctuation">&nbsp;[</span><span class="hljs-string">&quot;2026-07-28&quot;</span><span class="hljs-punctuation">]</span><span class="hljs-punctuation">,</span><span class="hljs-attr"><br>&nbsp;&nbsp;&nbsp;&nbsp;&quot;capabilities&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-punctuation">&nbsp;{</span><span class="hljs-attr">&nbsp;&quot;tools&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-punctuation">&nbsp;{</span><span class="hljs-punctuation">}</span><span class="hljs-punctuation">,</span><span class="hljs-attr">&nbsp;&quot;resources&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-punctuation">&nbsp;{</span><span class="hljs-punctuation">}</span><span class="hljs-punctuation">&nbsp;}</span><span class="hljs-punctuation">,</span><span class="hljs-attr"><br>&nbsp;&nbsp;&nbsp;&nbsp;&quot;instructions&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-string">&nbsp;&quot;按&nbsp;list_datasets&nbsp;→&nbsp;describe_table&nbsp;→&nbsp;filter_rows&nbsp;的顺序使用。&quot;</span><span class="hljs-punctuation">,</span><span class="hljs-attr"><br>&nbsp;&nbsp;&nbsp;&nbsp;&quot;ttlMs&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-number">&nbsp;300000</span><span class="hljs-punctuation">,</span><span class="hljs-attr"><br>&nbsp;&nbsp;&nbsp;&nbsp;&quot;cacheScope&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-string">&nbsp;&quot;public&quot;</span><span class="hljs-punctuation"><br>&nbsp;&nbsp;}</span><span class="hljs-punctuation"><br>}</span></code></pre>
+        <p class="p">
+          <code class="codespan">server/discover</code>
+          是<strong>必须实现</strong>的方法，但它对客户端是<strong>可选调用</strong>——客户端也可以直接发
+          <code class="codespan">tools/list</code
+          >。它的价值在于一次往返拿到版本、能力、身份和使用说明。
+        </p>
+        <p class="p">
+          <code class="codespan">instructions</code>
+          字段值得重视：它是你唯一能对模型说&quot;请按这个顺序用我的工具&quot;的地方。
+        </p>
+        <h3
+          class="h3"
+          data-heading="true"
+          style="
+            padding-left: 12px;
+            font-size: calc(16px * 1.2);
+            border-radius: 6px;
+            line-height: 2.4em;
+            border-left: 4px solid #0f4c81;
+            border-right: 1px solid color-mix(in srgb, #0f4c81 10%, transparent);
+            border-bottom: 1px solid
+              color-mix(in srgb, #0f4c81 10%, transparent);
+            border-top: 1px solid color-mix(in srgb, #0f4c81 10%, transparent);
+            background: color-mix(in srgb, #0f4c81 8%, transparent);
+          "
+          id="s7-2"
+        >
+          7.2 列工具
+        </h3>
+        <pre
+          class="hljs code__pre"
+          style="border: 1px solid rgba(0, 0, 0, 0.04)"
+        ><span class="mac-sign" style="display: none; padding: 10px 14px 0;"><svg xmlns="http://www.w3.org/2000/svg" version="1.1" x="0px" y="0px" width="45px" height="13px" viewBox="0 0 450 130">
+    <ellipse cx="50" cy="65" rx="50" ry="52" stroke="rgb(220,60,54)" stroke-width="2" fill="rgb(237,108,96)"/>
+    <ellipse cx="225" cy="65" rx="50" ry="52" stroke="rgb(218,151,33)" stroke-width="2" fill="rgb(247,193,81)"/>
+    <ellipse cx="400" cy="65" rx="50" ry="52" stroke="rgb(27,161,37)" stroke-width="2" fill="rgb(100,200,86)"/>
+  </svg></span><code class="language-bash" style="font-family: 'Fira Code',
+    Menlo,
+    Operator Mono,
+    Consolas,
+    Monaco,
+    monospace;">&nbsp;&nbsp;-H<span class="hljs-string">&nbsp;&#x27;Mcp-Method:&nbsp;tools/list&#x27;</span>&nbsp;\<br>&nbsp;&nbsp;-d<span class="hljs-string">&nbsp;&#x27;{&nbsp;&quot;jsonrpc&quot;:&quot;2.0&quot;,&quot;id&quot;:2,&quot;method&quot;:&quot;tools/list&quot;,&quot;params&quot;:{&nbsp;&quot;_meta&quot;:&nbsp;{&nbsp;...&nbsp;}&nbsp;}&nbsp;}&#x27;</span></code></pre>
+        <pre
+          class="hljs code__pre"
+          style="border: 1px solid rgba(0, 0, 0, 0.04)"
+        ><span class="mac-sign" style="display: none; padding: 10px 14px 0;"><svg xmlns="http://www.w3.org/2000/svg" version="1.1" x="0px" y="0px" width="45px" height="13px" viewBox="0 0 450 130">
+    <ellipse cx="50" cy="65" rx="50" ry="52" stroke="rgb(220,60,54)" stroke-width="2" fill="rgb(237,108,96)"/>
+    <ellipse cx="225" cy="65" rx="50" ry="52" stroke="rgb(218,151,33)" stroke-width="2" fill="rgb(247,193,81)"/>
+    <ellipse cx="400" cy="65" rx="50" ry="52" stroke="rgb(27,161,37)" stroke-width="2" fill="rgb(100,200,86)"/>
+  </svg></span><code class="language-json" style="font-family: 'Fira Code',
+    Menlo,
+    Operator Mono,
+    Consolas,
+    Monaco,
+    monospace;"><span class="hljs-punctuation">{</span><span class="hljs-attr"><br>&nbsp;&nbsp;&quot;result&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-punctuation">&nbsp;{</span><span class="hljs-attr"><br>&nbsp;&nbsp;&nbsp;&nbsp;&quot;resultType&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-string">&nbsp;&quot;complete&quot;</span><span class="hljs-punctuation">,</span><span class="hljs-attr"><br>&nbsp;&nbsp;&nbsp;&nbsp;&quot;tools&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-punctuation">&nbsp;[</span><span class="hljs-punctuation"><br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;{</span><span class="hljs-attr"><br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&quot;name&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-string">&nbsp;&quot;filter_rows&quot;</span><span class="hljs-punctuation">,</span><span class="hljs-attr"><br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&quot;description&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-string">&nbsp;&quot;...&quot;</span><span class="hljs-punctuation">,</span><span class="hljs-attr"><br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&quot;inputSchema&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-punctuation">&nbsp;{</span><span class="hljs-attr">&nbsp;&quot;type&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-string">&nbsp;&quot;object&quot;</span><span class="hljs-punctuation">&nbsp;}</span><span class="hljs-punctuation"><br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}</span><span class="hljs-punctuation"><br>&nbsp;&nbsp;&nbsp;&nbsp;]</span><span class="hljs-punctuation">,</span><span class="hljs-attr"><br>&nbsp;&nbsp;&nbsp;&nbsp;&quot;ttlMs&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-number">&nbsp;300000</span><span class="hljs-punctuation">,</span><span class="hljs-attr"><br>&nbsp;&nbsp;&nbsp;&nbsp;&quot;cacheScope&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-string">&nbsp;&quot;public&quot;</span><span class="hljs-punctuation"><br>&nbsp;&nbsp;}</span><span class="hljs-punctuation"><br>}</span></code></pre>
+        <p class="p">
+          <code class="codespan">ttlMs</code> 与
+          <code class="codespan">cacheScope</code>
+          让客户端缓存工具清单，也提高上游提示词缓存命中率。工具清单是静态的，给
+          5 分钟合理。<strong>顺序必须确定</strong>，否则每次缓存都失效。
+        </p>
+        <h3
+          class="h3"
+          data-heading="true"
+          style="
+            padding-left: 12px;
+            font-size: calc(16px * 1.2);
+            border-radius: 6px;
+            line-height: 2.4em;
+            border-left: 4px solid #0f4c81;
+            border-right: 1px solid color-mix(in srgb, #0f4c81 10%, transparent);
+            border-bottom: 1px solid
+              color-mix(in srgb, #0f4c81 10%, transparent);
+            border-top: 1px solid color-mix(in srgb, #0f4c81 10%, transparent);
+            background: color-mix(in srgb, #0f4c81 8%, transparent);
+          "
+          id="s7-3"
+        >
+          7.3 调工具
+        </h3>
+        <pre
+          class="hljs code__pre"
+          style="border: 1px solid rgba(0, 0, 0, 0.04)"
+        ><span class="mac-sign" style="display: none; padding: 10px 14px 0;"><svg xmlns="http://www.w3.org/2000/svg" version="1.1" x="0px" y="0px" width="45px" height="13px" viewBox="0 0 450 130">
+    <ellipse cx="50" cy="65" rx="50" ry="52" stroke="rgb(220,60,54)" stroke-width="2" fill="rgb(237,108,96)"/>
+    <ellipse cx="225" cy="65" rx="50" ry="52" stroke="rgb(218,151,33)" stroke-width="2" fill="rgb(247,193,81)"/>
+    <ellipse cx="400" cy="65" rx="50" ry="52" stroke="rgb(27,161,37)" stroke-width="2" fill="rgb(100,200,86)"/>
+  </svg></span><code class="language-bash" style="font-family: 'Fira Code',
+    Menlo,
+    Operator Mono,
+    Consolas,
+    Monaco,
+    monospace;">&nbsp;&nbsp;-H<span class="hljs-string">&nbsp;&#x27;Mcp-Method:&nbsp;tools/call&#x27;</span>&nbsp;\<br>&nbsp;&nbsp;-H<span class="hljs-string">&nbsp;&#x27;Mcp-Name:&nbsp;filter_rows&#x27;</span>&nbsp;\<br>&nbsp;&nbsp;-d<span class="hljs-string">&nbsp;&#x27;{&nbsp;&quot;jsonrpc&quot;:&quot;2.0&quot;,&quot;id&quot;:3,&quot;method&quot;:&quot;tools/call&quot;,<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&quot;params&quot;:&nbsp;{&nbsp;&quot;name&quot;:&quot;filter_rows&quot;,&nbsp;&quot;arguments&quot;:&nbsp;{&nbsp;&quot;limit&quot;:&nbsp;50&nbsp;},&nbsp;&quot;_meta&quot;:&nbsp;{&nbsp;...&nbsp;}&nbsp;}&nbsp;}&#x27;</span></code></pre>
+        <pre
+          class="hljs code__pre"
+          style="border: 1px solid rgba(0, 0, 0, 0.04)"
+        ><span class="mac-sign" style="display: none; padding: 10px 14px 0;"><svg xmlns="http://www.w3.org/2000/svg" version="1.1" x="0px" y="0px" width="45px" height="13px" viewBox="0 0 450 130">
+    <ellipse cx="50" cy="65" rx="50" ry="52" stroke="rgb(220,60,54)" stroke-width="2" fill="rgb(237,108,96)"/>
+    <ellipse cx="225" cy="65" rx="50" ry="52" stroke="rgb(218,151,33)" stroke-width="2" fill="rgb(247,193,81)"/>
+    <ellipse cx="400" cy="65" rx="50" ry="52" stroke="rgb(27,161,37)" stroke-width="2" fill="rgb(100,200,86)"/>
+  </svg></span><code class="language-json" style="font-family: 'Fira Code',
+    Menlo,
+    Operator Mono,
+    Consolas,
+    Monaco,
+    monospace;"><span class="hljs-punctuation">{</span><span class="hljs-attr"><br>&nbsp;&nbsp;&quot;result&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-punctuation">&nbsp;{</span><span class="hljs-attr"><br>&nbsp;&nbsp;&nbsp;&nbsp;&quot;resultType&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-string">&nbsp;&quot;complete&quot;</span><span class="hljs-punctuation">,</span><span class="hljs-attr"><br>&nbsp;&nbsp;&nbsp;&nbsp;&quot;content&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-punctuation">&nbsp;[</span><span class="hljs-punctuation">{</span><span class="hljs-attr">&nbsp;&quot;type&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-string">&nbsp;&quot;text&quot;</span><span class="hljs-punctuation">,</span><span class="hljs-attr">&nbsp;&quot;text&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-string">&nbsp;&quot;...&quot;</span><span class="hljs-punctuation">&nbsp;}</span><span class="hljs-punctuation">]</span><span class="hljs-punctuation">,</span><span class="hljs-attr"><br>&nbsp;&nbsp;&nbsp;&nbsp;&quot;structuredContent&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-punctuation">&nbsp;{</span><span class="hljs-attr">&nbsp;&quot;rows&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-punctuation">&nbsp;[</span><span class="hljs-punctuation">]</span><span class="hljs-punctuation">,</span><span class="hljs-attr">&nbsp;&quot;meta&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-punctuation">&nbsp;{</span><span class="hljs-punctuation">}</span><span class="hljs-punctuation">&nbsp;}</span><span class="hljs-punctuation">,</span><span class="hljs-attr"><br>&nbsp;&nbsp;&nbsp;&nbsp;&quot;isError&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-literal">&nbsp;<span class="hljs-keyword">false</span></span><span class="hljs-punctuation"><br>&nbsp;&nbsp;}</span><span class="hljs-punctuation"><br>}</span></code></pre>
+        <p class="p">
+          <code class="codespan">structuredContent</code>
+          是可校验的结构化结果，<code class="codespan">content</code>
+          里的文本是给模型读的兼容形态。两者都给最稳妥。
+        </p>
+        <h3
+          class="h3"
+          data-heading="true"
+          style="
+            padding-left: 12px;
+            font-size: calc(16px * 1.2);
+            border-radius: 6px;
+            line-height: 2.4em;
+            border-left: 4px solid #0f4c81;
+            border-right: 1px solid color-mix(in srgb, #0f4c81 10%, transparent);
+            border-bottom: 1px solid
+              color-mix(in srgb, #0f4c81 10%, transparent);
+            border-top: 1px solid color-mix(in srgb, #0f4c81 10%, transparent);
+            background: color-mix(in srgb, #0f4c81 8%, transparent);
+          "
+          id="s7-4"
+        >
+          7.4 多轮往返（MRTR）
+        </h3>
+        <p class="p">
+          工具执行到一半需要用户确认（&quot;查哪一层？&quot;）或需要借用宿主的模型时，服务端不占着连接干等，而是返回：
+        </p>
+        <pre
+          class="hljs code__pre"
+          style="border: 1px solid rgba(0, 0, 0, 0.04)"
+        ><span class="mac-sign" style="display: none; padding: 10px 14px 0;"><svg xmlns="http://www.w3.org/2000/svg" version="1.1" x="0px" y="0px" width="45px" height="13px" viewBox="0 0 450 130">
+    <ellipse cx="50" cy="65" rx="50" ry="52" stroke="rgb(220,60,54)" stroke-width="2" fill="rgb(237,108,96)"/>
+    <ellipse cx="225" cy="65" rx="50" ry="52" stroke="rgb(218,151,33)" stroke-width="2" fill="rgb(247,193,81)"/>
+    <ellipse cx="400" cy="65" rx="50" ry="52" stroke="rgb(27,161,37)" stroke-width="2" fill="rgb(100,200,86)"/>
+  </svg></span><code class="language-json" style="font-family: 'Fira Code',
+    Menlo,
+    Operator Mono,
+    Consolas,
+    Monaco,
+    monospace;"><span class="hljs-punctuation">{</span><span class="hljs-attr"><br>&nbsp;&nbsp;&quot;result&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-punctuation">&nbsp;{</span><span class="hljs-attr"><br>&nbsp;&nbsp;&nbsp;&nbsp;&quot;resultType&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-string">&nbsp;&quot;input_required&quot;</span><span class="hljs-punctuation">,</span><span class="hljs-attr"><br>&nbsp;&nbsp;&nbsp;&nbsp;&quot;inputRequests&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-punctuation">&nbsp;{</span><span class="hljs-attr"><br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&quot;which_floor&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-punctuation">&nbsp;{</span><span class="hljs-attr"><br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&quot;method&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-string">&nbsp;&quot;elicitation/create&quot;</span><span class="hljs-punctuation">,</span><span class="hljs-attr"><br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&quot;params&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-punctuation">&nbsp;{</span><span class="hljs-attr">&nbsp;&quot;mode&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-string">&nbsp;&quot;form&quot;</span><span class="hljs-punctuation">,</span><span class="hljs-attr">&nbsp;&quot;message&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-string">&nbsp;&quot;查哪一层？&quot;</span><span class="hljs-punctuation">,</span><span class="hljs-attr">&nbsp;&quot;requestedSchema&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-punctuation">&nbsp;{</span><span class="hljs-attr">&nbsp;&quot;type&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-string">&nbsp;&quot;object&quot;</span><span class="hljs-punctuation">&nbsp;}</span><span class="hljs-punctuation">&nbsp;}</span><span class="hljs-punctuation"><br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}</span><span class="hljs-punctuation"><br>&nbsp;&nbsp;&nbsp;&nbsp;}</span><span class="hljs-punctuation">,</span><span class="hljs-attr"><br>&nbsp;&nbsp;&nbsp;&nbsp;&quot;requestState&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-string">&nbsp;&quot;AEAD-protected&nbsp;blob&quot;</span><span class="hljs-punctuation"><br>&nbsp;&nbsp;}</span><span class="hljs-punctuation"><br>}</span></code></pre>
+        <p class="p">
+          <code class="codespan">inputRequests</code> 是
+          <strong>map ，不是数组</strong>：键由服务端自己起，值是
+          <code class="codespan">elicitation/create</code>、<code
+            class="codespan"
+            >sampling/createMessage</code
+          >、<code class="codespan">roots/list</code>
+          三者之一。写成数组是最常见的错误。
+        </p>
+        <p class="p">
+          客户端把答复按同样的键放进
+          <code class="codespan">inputResponses</code>，连同原样回传的
+          <code class="codespan">requestState</code>
+          <strong>重发一次新请求</strong>（<code class="codespan">id</code>
+          必须换新的，这是两次独立请求）。服务端把需要延续的上下文编码进
+          <code class="codespan">requestState</code>
+          就行——<strong>自己不用存任何会话</strong>，这正是 MRTR(Multi
+          Round-Trip Requests, 多轮往返请求)
+          取代&quot;服务端发请求&quot;的全部动机。
+        </p>
+        <p class="p">
+          三条约束见 3.2：只能用在三个方法上、<code class="codespan"
+            >inputRequests</code
+          >
+          与
+          <code class="codespan">requestState</code>
+          至少给一个、不能请求客户端没声明过的能力。
+        </p>
+        <h3
+          class="h3"
+          data-heading="true"
+          style="
+            padding-left: 12px;
+            font-size: calc(16px * 1.2);
+            border-radius: 6px;
+            line-height: 2.4em;
+            border-left: 4px solid #0f4c81;
+            border-right: 1px solid color-mix(in srgb, #0f4c81 10%, transparent);
+            border-bottom: 1px solid
+              color-mix(in srgb, #0f4c81 10%, transparent);
+            border-top: 1px solid color-mix(in srgb, #0f4c81 10%, transparent);
+            background: color-mix(in srgb, #0f4c81 8%, transparent);
+          "
+          id="s7-5"
+        >
+          7.5 与 2025 年教程的差异清单
+        </h3>
+        <p class="p">搜到旧教程时，对照这张表改：</p>
+        <section
+          style="
+            font-family:
+              -apple-system-font,
+              BlinkMacSystemFont,
+              Helvetica Neue,
+              PingFang SC,
+              Hiragino Sans GB,
+              Microsoft YaHei UI,
+              Microsoft YaHei,
+              Arial,
+              sans-serif;
+            font-size: 16px;
+            line-height: 1.75;
+            text-align: left;
+            max-width: 100%;
+            overflow: auto;
+          "
+        >
+          <div class="table-scroll">
+            <table class="preview-table" style="margin-top: 0 !important">
+              <thead>
+                <th class="th">旧写法</th>
+                <th class="th">现在</th>
+              </thead>
+              <tbody>
+                <tr class="tr">
+                  <td class="td">
+                    先 <code class="codespan">initialize</code> 握手
+                  </td>
+                  <td class="td">
+                    不需要，每请求自带 <code class="codespan">_meta</code>
+                  </td>
+                </tr>
+                <tr class="tr">
+                  <td class="td">
+                    服务端返回 <code class="codespan">Mcp-Session-Id</code>
+                  </td>
+                  <td class="td">已删除，收到也忽略</td>
+                </tr>
+                <tr class="tr">
+                  <td class="td">
+                    请求 <code class="codespan">GET /mcp</code> 开 SSE 长流
+                  </td>
+                  <td class="td">已删除，<code class="codespan">405</code></td>
+                </tr>
+                <tr class="tr">
+                  <td class="td">
+                    只带 <code class="codespan">Content-Type</code>
+                  </td>
+                  <td class="td">
+                    还要带
+                    <code class="codespan">MCP-Protocol-Version</code>、<code
+                      class="codespan"
+                      >Mcp-Method</code
+                    >、<code class="codespan">Mcp-Name</code>
+                  </td>
+                </tr>
+                <tr class="tr">
+                  <td class="td">
+                    <code class="codespan">result</code> 随意结构
+                  </td>
+                  <td class="td">
+                    必须含 <code class="codespan">resultType</code>
+                  </td>
+                </tr>
+                <tr class="tr">
+                  <td class="td">
+                    服务端在流上发
+                    <code class="codespan">sampling/createMessage</code>
+                  </td>
+                  <td class="td">
+                    改为 MRTR 的 <code class="codespan">input_required</code>
+                  </td>
+                </tr>
+                <tr class="tr">
+                  <td class="td">
+                    取消发 <code class="codespan">notifications/cancelled</code>
+                  </td>
+                  <td class="td">仅 stdio；HTTP 上关流即取消</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+        <hr
+          class="hr"
+          style="
+            height: 1px;
+            border: none;
+            margin: 2em 0;
+            background: linear-gradient(
+              to right,
+              rgba(0, 0, 0, 0),
+              rgba(0, 0, 0, 0.1),
+              rgba(0, 0, 0, 0)
+            );
+          "
+        />
+        <h2
+          class="h2"
+          data-heading="true"
+          style="
+            padding: 0.3em 1.2em;
+            font-size: calc(16px * 1.3);
+            border-radius: 8px 24px 8px 24px;
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.06);
+          "
+          id="s8"
+        >
+          8. JSON-RPC 错误码
+        </h2>
+        <p class="p">
+          有约定，而且分三段管理。新手最容易把&quot;协议错误&quot;和&quot;业务失败&quot;混在一起。
+        </p>
+        <h3
+          class="h3"
+          data-heading="true"
+          style="
+            padding-left: 12px;
+            font-size: calc(16px * 1.2);
+            border-radius: 6px;
+            line-height: 2.4em;
+            border-left: 4px solid #0f4c81;
+            border-right: 1px solid color-mix(in srgb, #0f4c81 10%, transparent);
+            border-bottom: 1px solid
+              color-mix(in srgb, #0f4c81 10%, transparent);
+            border-top: 1px solid color-mix(in srgb, #0f4c81 10%, transparent);
+            background: color-mix(in srgb, #0f4c81 8%, transparent);
+          "
+          id="s8-1"
+        >
+          8.1 三段区间
+        </h3>
+        <p class="p">
+          <code class="codespan"
+            >JSON-RPC(JavaScript Object Notation Remote Procedure Call, 基于
+            JSON 的远程过程调用)</code
+          >
+          2.0 把整数空间划成三段：
+        </p>
+        <section
+          style="
+            font-family:
+              -apple-system-font,
+              BlinkMacSystemFont,
+              Helvetica Neue,
+              PingFang SC,
+              Hiragino Sans GB,
+              Microsoft YaHei UI,
+              Microsoft YaHei,
+              Arial,
+              sans-serif;
+            font-size: 16px;
+            line-height: 1.75;
+            text-align: left;
+            max-width: 100%;
+            overflow: auto;
+          "
+        >
+          <div class="table-scroll">
+            <table class="preview-table" style="margin-top: 0 !important">
+              <thead>
+                <th class="th">区间</th>
+                <th class="th">归属</th>
+              </thead>
+              <tbody>
+                <tr class="tr">
+                  <td class="td">
+                    <code class="codespan">-32768</code> ~
+                    <code class="codespan">-32000</code>
+                  </td>
+                  <td class="td">
+                    <strong>JSON-RPC 保留</strong>，其中
+                    <code class="codespan">-32000</code> ~
+                    <code class="codespan">-32099</code> 留给服务端实现
+                  </td>
+                </tr>
+                <tr class="tr">
+                  <td class="td">其余整数</td>
+                  <td class="td">应用自定义</td>
+                </tr>
+                <tr class="tr">
+                  <td class="td">注意</td>
+                  <td class="td">
+                    新应用自定义码应分配在
+                    <code class="codespan">-32768</code> ~
+                    <code class="codespan">-32000</code> <strong>之外</strong>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+        <p class="p">MCP 又对保留段做了细分：</p>
+        <section
+          style="
+            font-family:
+              -apple-system-font,
+              BlinkMacSystemFont,
+              Helvetica Neue,
+              PingFang SC,
+              Hiragino Sans GB,
+              Microsoft YaHei UI,
+              Microsoft YaHei,
+              Arial,
+              sans-serif;
+            font-size: 16px;
+            line-height: 1.75;
+            text-align: left;
+            max-width: 100%;
+            overflow: auto;
+          "
+        >
+          <div class="table-scroll">
+            <table class="preview-table" style="margin-top: 0 !important">
+              <thead>
+                <th class="th">子区间</th>
+                <th class="th">用途</th>
+              </thead>
+              <tbody>
+                <tr class="tr">
+                  <td class="td">
+                    <code class="codespan">-32000</code> ~
+                    <code class="codespan">-32019</code>
+                  </td>
+                  <td class="td">
+                    <strong>legacy</strong
+                    >：早期实现自行占用。新代码不得再分配，也不应使用。除
+                    <code class="codespan">-32002</code>
+                    外，接收方不得假设具体含义
+                  </td>
+                </tr>
+                <tr class="tr">
+                  <td class="td">
+                    <code class="codespan">-32020</code> ~
+                    <code class="codespan">-32099</code>
+                  </td>
+                  <td class="td">
+                    <strong>MCP 规范专属</strong
+                    >。实现只能发出规范定义过的码，且必须严格按定义使用
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+        <h3
+          class="h3"
+          data-heading="true"
+          style="
+            padding-left: 12px;
+            font-size: calc(16px * 1.2);
+            border-radius: 6px;
+            line-height: 2.4em;
+            border-left: 4px solid #0f4c81;
+            border-right: 1px solid color-mix(in srgb, #0f4c81 10%, transparent);
+            border-bottom: 1px solid
+              color-mix(in srgb, #0f4c81 10%, transparent);
+            border-top: 1px solid color-mix(in srgb, #0f4c81 10%, transparent);
+            background: color-mix(in srgb, #0f4c81 8%, transparent);
+          "
+          id="s8-2"
+        >
+          8.2 标准码（来自 JSON-RPC 2.0）
+        </h3>
+        <section
+          style="
+            font-family:
+              -apple-system-font,
+              BlinkMacSystemFont,
+              Helvetica Neue,
+              PingFang SC,
+              Hiragino Sans GB,
+              Microsoft YaHei UI,
+              Microsoft YaHei,
+              Arial,
+              sans-serif;
+            font-size: 16px;
+            line-height: 1.75;
+            text-align: left;
+            max-width: 100%;
+            overflow: auto;
+          "
+        >
+          <div class="table-scroll">
+            <table class="preview-table" style="margin-top: 0 !important">
+              <thead>
+                <th class="th">码</th>
+                <th class="th">名称</th>
+                <th class="th">含义</th>
+              </thead>
+              <tbody>
+                <tr class="tr">
+                  <td class="td"><code class="codespan">-32700</code></td>
+                  <td class="td">Parse error</td>
+                  <td class="td">body 不是合法 JSON</td>
+                </tr>
+                <tr class="tr">
+                  <td class="td"><code class="codespan">-32600</code></td>
+                  <td class="td">Invalid Request</td>
+                  <td class="td">
+                    信封不合法：<code class="codespan">jsonrpc</code> 不是
+                    <code class="codespan">&quot;2.0&quot;</code>、<code
+                      class="codespan"
+                      >id</code
+                    >
+                    为 <code class="codespan">null</code>、<code
+                      class="codespan"
+                      >method</code
+                    >
+                    不是字符串
+                  </td>
+                </tr>
+                <tr class="tr">
+                  <td class="td"><code class="codespan">-32601</code></td>
+                  <td class="td">Method not found</td>
+                  <td class="td">方法未实现</td>
+                </tr>
+                <tr class="tr">
+                  <td class="td"><code class="codespan">-32602</code></td>
+                  <td class="td">Invalid params</td>
+                  <td class="td">
+                    参数不合法，或 <code class="codespan">_meta</code> 缺必填
+                  </td>
+                </tr>
+                <tr class="tr">
+                  <td class="td"><code class="codespan">-32603</code></td>
+                  <td class="td">Internal error</td>
+                  <td class="td">服务端内部异常</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+        <h3
+          class="h3"
+          data-heading="true"
+          style="
+            padding-left: 12px;
+            font-size: calc(16px * 1.2);
+            border-radius: 6px;
+            line-height: 2.4em;
+            border-left: 4px solid #0f4c81;
+            border-right: 1px solid color-mix(in srgb, #0f4c81 10%, transparent);
+            border-bottom: 1px solid
+              color-mix(in srgb, #0f4c81 10%, transparent);
+            border-top: 1px solid color-mix(in srgb, #0f4c81 10%, transparent);
+            background: color-mix(in srgb, #0f4c81 8%, transparent);
+          "
+          id="s8-3"
+        >
+          8.3 MCP 专用码（2026-07-28）
+        </h3>
+        <section
+          style="
+            font-family:
+              -apple-system-font,
+              BlinkMacSystemFont,
+              Helvetica Neue,
+              PingFang SC,
+              Hiragino Sans GB,
+              Microsoft YaHei UI,
+              Microsoft YaHei,
+              Arial,
+              sans-serif;
+            font-size: 16px;
+            line-height: 1.75;
+            text-align: left;
+            max-width: 100%;
+            overflow: auto;
+          "
+        >
+          <div class="table-scroll">
+            <table class="preview-table" style="margin-top: 0 !important">
+              <thead>
+                <th class="th">码</th>
+                <th class="th">名称</th>
+                <th class="th">触发场景</th>
+              </thead>
+              <tbody>
+                <tr class="tr">
+                  <td class="td"><code class="codespan">-32020</code></td>
+                  <td class="td">
+                    <code class="codespan">HeaderMismatch</code>
+                  </td>
+                  <td class="td">必填头缺失，或头值与 body 不一致</td>
+                </tr>
+                <tr class="tr">
+                  <td class="td"><code class="codespan">-32021</code></td>
+                  <td class="td">
+                    <code class="codespan"
+                      >MissingRequiredClientCapability</code
+                    >
+                  </td>
+                  <td class="td">处理该请求需要客户端未声明的能力</td>
+                </tr>
+                <tr class="tr">
+                  <td class="td"><code class="codespan">-32022</code></td>
+                  <td class="td">
+                    <code class="codespan">UnsupportedProtocolVersion</code>
+                  </td>
+                  <td class="td">请求的协议版本不在服务端支持列表</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+        <h3
+          class="h3"
+          data-heading="true"
+          style="
+            padding-left: 12px;
+            font-size: calc(16px * 1.2);
+            border-radius: 6px;
+            line-height: 2.4em;
+            border-left: 4px solid #0f4c81;
+            border-right: 1px solid color-mix(in srgb, #0f4c81 10%, transparent);
+            border-bottom: 1px solid
+              color-mix(in srgb, #0f4c81 10%, transparent);
+            border-top: 1px solid color-mix(in srgb, #0f4c81 10%, transparent);
+            background: color-mix(in srgb, #0f4c81 8%, transparent);
+          "
+          id="s8-4"
+        >
+          8.4 已废弃、不能再发的码
+        </h3>
+        <section
+          style="
+            font-family:
+              -apple-system-font,
+              BlinkMacSystemFont,
+              Helvetica Neue,
+              PingFang SC,
+              Hiragino Sans GB,
+              Microsoft YaHei UI,
+              Microsoft YaHei,
+              Arial,
+              sans-serif;
+            font-size: 16px;
+            line-height: 1.75;
+            text-align: left;
+            max-width: 100%;
+            overflow: auto;
+          "
+        >
+          <div class="table-scroll">
+            <table class="preview-table" style="margin-top: 0 !important">
+              <thead>
+                <th class="th">码</th>
+                <th class="th">原用途</th>
+                <th class="th">现状</th>
+              </thead>
+              <tbody>
+                <tr class="tr">
+                  <td class="td"><code class="codespan">-32002</code></td>
+                  <td class="td">resource not found（2025-11-25 及更早）</td>
+                  <td class="td">
+                    被
+                    <code class="codespan">-32602</code>
+                    取代。客户端仍应接受旧服务端发来的此码；新实现不得发出
+                  </td>
+                </tr>
+                <tr class="tr">
+                  <td class="td"><code class="codespan">-32042</code></td>
+                  <td class="td">URL elicitation required（仅 2025-11-25）</td>
+                  <td class="td">已废弃</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+        <h3
+          class="h3"
+          data-heading="true"
+          style="
+            padding-left: 12px;
+            font-size: calc(16px * 1.2);
+            border-radius: 6px;
+            line-height: 2.4em;
+            border-left: 4px solid #0f4c81;
+            border-right: 1px solid color-mix(in srgb, #0f4c81 10%, transparent);
+            border-bottom: 1px solid
+              color-mix(in srgb, #0f4c81 10%, transparent);
+            border-top: 1px solid color-mix(in srgb, #0f4c81 10%, transparent);
+            background: color-mix(in srgb, #0f4c81 8%, transparent);
+          "
+          id="s8-5"
+        >
+          8.5 错误码与 HTTP 状态码是两层，必须同时给
+        </h3>
+        <p class="p">
+          这是最容易写错的地方。<strong
+            >错误码不是 HTTP 状态码的替代品，两者要一一配合。</strong
+          >
+        </p>
+        <section
+          style="
+            font-family:
+              -apple-system-font,
+              BlinkMacSystemFont,
+              Helvetica Neue,
+              PingFang SC,
+              Hiragino Sans GB,
+              Microsoft YaHei UI,
+              Microsoft YaHei,
+              Arial,
+              sans-serif;
+            font-size: 16px;
+            line-height: 1.75;
+            text-align: left;
+            max-width: 100%;
+            overflow: auto;
+          "
+        >
+          <div class="table-scroll">
+            <table class="preview-table" style="margin-top: 0 !important">
+              <thead>
+                <th class="th">场景</th>
+                <th class="th">HTTP</th>
+                <th class="th">JSON-RPC</th>
+              </thead>
+              <tbody>
+                <tr class="tr">
+                  <td class="td">body 不是合法 JSON</td>
+                  <td class="td"><code class="codespan">400</code></td>
+                  <td class="td"><code class="codespan">-32700</code></td>
+                </tr>
+                <tr class="tr">
+                  <td class="td">信封不合法</td>
+                  <td class="td"><code class="codespan">400</code></td>
+                  <td class="td"><code class="codespan">-32600</code></td>
+                </tr>
+                <tr class="tr">
+                  <td class="td">方法未实现</td>
+                  <td class="td"><strong></strong></td>
+                  <td class="td"><code class="codespan">-32601</code></td>
+                </tr>
+                <tr class="tr">
+                  <td class="td">
+                    参数不合法 / <code class="codespan">_meta</code> 缺必填
+                  </td>
+                  <td class="td"><code class="codespan">400</code></td>
+                  <td class="td"><code class="codespan">-32602</code></td>
+                </tr>
+                <tr class="tr">
+                  <td class="td">服务端内部异常</td>
+                  <td class="td"><code class="codespan">500</code></td>
+                  <td class="td"><code class="codespan">-32603</code></td>
+                </tr>
+                <tr class="tr">
+                  <td class="td">头缺失或不一致</td>
+                  <td class="td"><code class="codespan">400</code></td>
+                  <td class="td"><code class="codespan">-32020</code></td>
+                </tr>
+                <tr class="tr">
+                  <td class="td">缺客户端能力</td>
+                  <td class="td"><code class="codespan">400</code></td>
+                  <td class="td"><code class="codespan">-32021</code></td>
+                </tr>
+                <tr class="tr">
+                  <td class="td">版本不支持</td>
+                  <td class="td"><code class="codespan">400</code></td>
+                  <td class="td"><code class="codespan">-32022</code></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+        <p class="p">两个反直觉点：</p>
+        <ul class="ul" style="list-style: none; padding-left: 1.5em">
+          <li class="listitem" style="margin: 0.5em 8px">
+            • <strong> 配的是 ，不是 。</strong> 网关靠
+            <code class="codespan">404</code> 判断端点不认这个方法。
+          </li>
+          <li class="listitem" style="margin: 0.5em 8px">
+            • <strong> 配的是 。</strong> 规范没为它单列状态码，按 malformed
+            request 统一处理。
+          </li>
+        </ul>
+        <p class="p">
+          如果只回 HTTP 400 而 body
+          里没有错误码，客户端无法区分&quot;协议层错&quot;还是&quot;业务层错&quot;，重试策略和提示都会乱。
+        </p>
+        <h3
+          class="h3"
+          data-heading="true"
+          style="
+            padding-left: 12px;
+            font-size: calc(16px * 1.2);
+            border-radius: 6px;
+            line-height: 2.4em;
+            border-left: 4px solid #0f4c81;
+            border-right: 1px solid color-mix(in srgb, #0f4c81 10%, transparent);
+            border-bottom: 1px solid
+              color-mix(in srgb, #0f4c81 10%, transparent);
+            border-top: 1px solid color-mix(in srgb, #0f4c81 10%, transparent);
+            background: color-mix(in srgb, #0f4c81 8%, transparent);
+          "
+          id="s8-6"
+        >
+          8.6 业务失败不要用错误码
+        </h3>
+        <p class="p">
+          SQL
+          语法错、表不存在、参数值越界——这些<strong>不是协议错误</strong>，应该返回
+          HTTP <code class="codespan">200</code> +
+          <code class="codespan">result.isError = true</code>：
+        </p>
+        <pre
+          class="hljs code__pre"
+          style="border: 1px solid rgba(0, 0, 0, 0.04)"
+        ><span class="mac-sign" style="display: none; padding: 10px 14px 0;"><svg xmlns="http://www.w3.org/2000/svg" version="1.1" x="0px" y="0px" width="45px" height="13px" viewBox="0 0 450 130">
+    <ellipse cx="50" cy="65" rx="50" ry="52" stroke="rgb(220,60,54)" stroke-width="2" fill="rgb(237,108,96)"/>
+    <ellipse cx="225" cy="65" rx="50" ry="52" stroke="rgb(218,151,33)" stroke-width="2" fill="rgb(247,193,81)"/>
+    <ellipse cx="400" cy="65" rx="50" ry="52" stroke="rgb(27,161,37)" stroke-width="2" fill="rgb(100,200,86)"/>
+  </svg></span><code class="language-json" style="font-family: 'Fira Code',
+    Menlo,
+    Operator Mono,
+    Consolas,
+    Monaco,
+    monospace;"><span class="hljs-punctuation">{</span><span class="hljs-attr"><br>&nbsp;&nbsp;&quot;jsonrpc&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-string">&nbsp;&quot;2.0&quot;</span><span class="hljs-punctuation">,</span><span class="hljs-attr"><br>&nbsp;&nbsp;&quot;id&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-number">&nbsp;3</span><span class="hljs-punctuation">,</span><span class="hljs-attr"><br>&nbsp;&nbsp;&quot;result&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-punctuation">&nbsp;{</span><span class="hljs-attr"><br>&nbsp;&nbsp;&nbsp;&nbsp;&quot;resultType&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-string">&nbsp;&quot;complete&quot;</span><span class="hljs-punctuation">,</span><span class="hljs-attr"><br>&nbsp;&nbsp;&nbsp;&nbsp;&quot;isError&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-literal">&nbsp;<span class="hljs-keyword">true</span></span><span class="hljs-punctuation">,</span><span class="hljs-attr"><br>&nbsp;&nbsp;&nbsp;&nbsp;&quot;content&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-punctuation">&nbsp;[</span><span class="hljs-punctuation"><br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;{</span><span class="hljs-attr"><br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&quot;type&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-string">&nbsp;&quot;text&quot;</span><span class="hljs-punctuation">,</span><span class="hljs-attr"><br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&quot;text&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-string">&nbsp;&quot;properties&nbsp;是&nbsp;LIST&lt;STRUCT&gt;，不支持&nbsp;like。请改用&nbsp;op=\&quot;hasProperty\&quot;。&quot;</span><span class="hljs-punctuation"><br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}</span><span class="hljs-punctuation"><br>&nbsp;&nbsp;&nbsp;&nbsp;]</span><span class="hljs-punctuation"><br>&nbsp;&nbsp;}</span><span class="hljs-punctuation"><br>}</span></code></pre>
+        <p class="p">
+          原因很实际：<strong
+            >错误文本会进入模型上下文，它下一次调用就会照着改。</strong
+          >
+          这比任何文档都有效，因为它刚好出现在需要的时候。如果只回
+          <code class="codespan">-32602</code> 和一句 &quot;Invalid
+          params&quot;，模型会开始瞎试，浪费好几轮调用。
+        </p>
+        <p class="p">
+          判断标准很简单：<strong
+            >错在&quot;报文格式&quot;用错误码，错在&quot;你的数据或参数含义&quot;用
+            。</strong
+          >
+        </p>
+        <hr
+          class="hr"
+          style="
+            height: 1px;
+            border: none;
+            margin: 2em 0;
+            background: linear-gradient(
+              to right,
+              rgba(0, 0, 0, 0),
+              rgba(0, 0, 0, 0.1),
+              rgba(0, 0, 0, 0)
+            );
+          "
+        />
+        <h2
+          class="h2"
+          data-heading="true"
+          style="
+            padding: 0.3em 1.2em;
+            font-size: calc(16px * 1.3);
+            border-radius: 8px 24px 8px 24px;
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.06);
+          "
+          id="s9"
+        >
+          9. 模型怎么知道你的工具
+        </h2>
+        <p class="p">
+          模型对工具的全部知识<strong>只来自 的返回值</strong>。它不读源码，不读
+          README，也猜不到你没声明的操作符。
+        </p>
+        <p class="p">
+          所以&quot;模型会不会用对&quot;不是模型的问题，是描述写得够不够。三层保障：
+        </p>
+        <h3
+          class="h3"
+          data-heading="true"
+          style="
+            padding-left: 12px;
+            font-size: calc(16px * 1.2);
+            border-radius: 6px;
+            line-height: 2.4em;
+            border-left: 4px solid #0f4c81;
+            border-right: 1px solid color-mix(in srgb, #0f4c81 10%, transparent);
+            border-bottom: 1px solid
+              color-mix(in srgb, #0f4c81 10%, transparent);
+            border-top: 1px solid color-mix(in srgb, #0f4c81 10%, transparent);
+            background: color-mix(in srgb, #0f4c81 8%, transparent);
+          "
+          id="s9-1"
+        >
+          9.1 第一层：<code class="codespan">enum</code> 让它发现选项存在
+        </h3>
+        <pre
+          class="hljs code__pre"
+          style="border: 1px solid rgba(0, 0, 0, 0.04)"
+        ><span class="mac-sign" style="display: none; padding: 10px 14px 0;"><svg xmlns="http://www.w3.org/2000/svg" version="1.1" x="0px" y="0px" width="45px" height="13px" viewBox="0 0 450 130">
+    <ellipse cx="50" cy="65" rx="50" ry="52" stroke="rgb(220,60,54)" stroke-width="2" fill="rgb(237,108,96)"/>
+    <ellipse cx="225" cy="65" rx="50" ry="52" stroke="rgb(218,151,33)" stroke-width="2" fill="rgb(247,193,81)"/>
+    <ellipse cx="400" cy="65" rx="50" ry="52" stroke="rgb(27,161,37)" stroke-width="2" fill="rgb(100,200,86)"/>
+  </svg></span><code class="language-json" style="font-family: 'Fira Code',
+    Menlo,
+    Operator Mono,
+    Consolas,
+    Monaco,
+    monospace;"><span class="hljs-attr">&quot;op&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-punctuation">&nbsp;{</span><span class="hljs-attr"><br>&nbsp;&nbsp;&quot;type&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-string">&nbsp;&quot;string&quot;</span><span class="hljs-punctuation">,</span><span class="hljs-attr"><br>&nbsp;&nbsp;&quot;enum&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-punctuation">&nbsp;[</span><span class="hljs-string">&quot;eq&quot;</span><span class="hljs-punctuation">,</span><span class="hljs-string">&nbsp;&quot;ne&quot;</span><span class="hljs-punctuation">,</span><span class="hljs-string">&nbsp;&quot;gt&quot;</span><span class="hljs-punctuation">,</span><span class="hljs-string">&nbsp;&quot;hasProperty&quot;</span><span class="hljs-punctuation">]</span><span class="hljs-punctuation">,</span><span class="hljs-attr"><br>&nbsp;&nbsp;&quot;description&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-string">&nbsp;&quot;比较操作符。hasProperty&nbsp;专用于&nbsp;LIST&lt;STRUCT&gt;&nbsp;列：value&nbsp;形如&nbsp;{\&quot;name\&quot;:\&quot;分类编码\&quot;,\&quot;equals\&quot;:\&quot;010101\&quot;}。对这类列用&nbsp;like&nbsp;会失败，因为它是数组不是字符串。&quot;</span><span class="hljs-punctuation"><br>}</span></code></pre>
+        <ul class="ul" style="list-style: none; padding-left: 1.5em">
+          <li class="listitem" style="margin: 0.5em 8px">
+            •
+            <code class="codespan">enum</code>
+            是模型发现&quot;有哪些操作&quot;的唯一途径，不列出来它就不会用
+          </li>
+          <li class="listitem" style="margin: 0.5em 8px">
+            •
+            <strong>负向约束比正面说明更有用</strong
+            >。模型最常犯的错不是不知道有
+            <code class="codespan">hasProperty</code>，而是觉得&quot;我用
+            <code class="codespan">like &#39;%分类编码%&#39;</code>
+            也能匹配上吧&quot;，听起来完全合理，实际直接报错
+          </li>
+        </ul>
+        <h3
+          class="h3"
+          data-heading="true"
+          style="
+            padding-left: 12px;
+            font-size: calc(16px * 1.2);
+            border-radius: 6px;
+            line-height: 2.4em;
+            border-left: 4px solid #0f4c81;
+            border-right: 1px solid color-mix(in srgb, #0f4c81 10%, transparent);
+            border-bottom: 1px solid
+              color-mix(in srgb, #0f4c81 10%, transparent);
+            border-top: 1px solid color-mix(in srgb, #0f4c81 10%, transparent);
+            background: color-mix(in srgb, #0f4c81 8%, transparent);
+          "
+          id="s9-2"
+        >
+          9.2 第二层：tool 级 <code class="codespan">description</code> 划清边界
+        </h3>
+        <pre
+          class="hljs code__pre"
+          style="border: 1px solid rgba(0, 0, 0, 0.04)"
+        ><span class="mac-sign" style="display: none; padding: 10px 14px 0;"><svg xmlns="http://www.w3.org/2000/svg" version="1.1" x="0px" y="0px" width="45px" height="13px" viewBox="0 0 450 130">
+    <ellipse cx="50" cy="65" rx="50" ry="52" stroke="rgb(220,60,54)" stroke-width="2" fill="rgb(237,108,96)"/>
+    <ellipse cx="225" cy="65" rx="50" ry="52" stroke="rgb(218,151,33)" stroke-width="2" fill="rgb(247,193,81)"/>
+    <ellipse cx="400" cy="65" rx="50" ry="52" stroke="rgb(27,161,37)" stroke-width="2" fill="rgb(100,200,86)"/>
+  </svg></span><code class="language-json" style="font-family: 'Fira Code',
+    Menlo,
+    Operator Mono,
+    Consolas,
+    Monaco,
+    monospace;"><span class="hljs-punctuation">{</span><span class="hljs-attr"><br>&nbsp;&nbsp;&quot;name&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-string">&nbsp;&quot;filter_rows&quot;</span><span class="hljs-punctuation">,</span><span class="hljs-attr"><br>&nbsp;&nbsp;&quot;description&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-string">&nbsp;&quot;按条件筛选行，支持属性匹配与范围过滤。适合：找构件、按属性筛、按范围过滤。不适合：分组统计、跨表关联——这些请用&nbsp;run_sql。&quot;</span><span class="hljs-punctuation"><br>}</span></code></pre>
+        <p class="p">
+          那句&quot;不适合……请用
+          run_sql&quot;是在<strong>做路由</strong>。模型面对两个工具经常选错，明确分工比让它自己权衡可靠。
+        </p>
+        <h3
+          class="h3"
+          data-heading="true"
+          style="
+            padding-left: 12px;
+            font-size: calc(16px * 1.2);
+            border-radius: 6px;
+            line-height: 2.4em;
+            border-left: 4px solid #0f4c81;
+            border-right: 1px solid color-mix(in srgb, #0f4c81 10%, transparent);
+            border-bottom: 1px solid
+              color-mix(in srgb, #0f4c81 10%, transparent);
+            border-top: 1px solid color-mix(in srgb, #0f4c81 10%, transparent);
+            background: color-mix(in srgb, #0f4c81 8%, transparent);
+          "
+          id="s9-3"
+        >
+          9.3 第三层：错误文本反向纠正
+        </h3>
+        <p class="p">见 8.6。前两层是预防，这一层是补救。</p>
+        <h3
+          class="h3"
+          data-heading="true"
+          style="
+            padding-left: 12px;
+            font-size: calc(16px * 1.2);
+            border-radius: 6px;
+            line-height: 2.4em;
+            border-left: 4px solid #0f4c81;
+            border-right: 1px solid color-mix(in srgb, #0f4c81 10%, transparent);
+            border-bottom: 1px solid
+              color-mix(in srgb, #0f4c81 10%, transparent);
+            border-top: 1px solid color-mix(in srgb, #0f4c81 10%, transparent);
+            background: color-mix(in srgb, #0f4c81 8%, transparent);
+          "
+          id="s9-4"
+        >
+          9.4 上下文预算
+        </h3>
+        <p class="p">
+          <code class="codespan">tools/list</code>
+          的全部内容会进模型上下文。工具越多、描述越长，占得越多，还会稀释注意力。分配原则：
+        </p>
+        <section
+          style="
+            font-family:
+              -apple-system-font,
+              BlinkMacSystemFont,
+              Helvetica Neue,
+              PingFang SC,
+              Hiragino Sans GB,
+              Microsoft YaHei UI,
+              Microsoft YaHei,
+              Arial,
+              sans-serif;
+            font-size: 16px;
+            line-height: 1.75;
+            text-align: left;
+            max-width: 100%;
+            overflow: auto;
+          "
+        >
+          <div class="table-scroll">
+            <table class="preview-table" style="margin-top: 0 !important">
+              <thead>
+                <th class="th">放哪</th>
+                <th class="th">放什么</th>
+                <th class="th">为什么</th>
+              </thead>
+              <tbody>
+                <tr class="tr">
+                  <td class="td">
+                    tool <code class="codespan">description</code>
+                  </td>
+                  <td class="td">一到两句加分工指引</td>
+                  <td class="td">每次会话都在，必须短</td>
+                </tr>
+                <tr class="tr">
+                  <td class="td">
+                    参数 <code class="codespan">description</code>
+                  </td>
+                  <td class="td">含义、枚举、典型值</td>
+                  <td class="td">用到时才细看</td>
+                </tr>
+                <tr class="tr">
+                  <td class="td">Resource</td>
+                  <td class="td">完整手册、字段全表、示例集</td>
+                  <td class="td">按需读取，不占常驻上下文</td>
+                </tr>
+                <tr class="tr">
+                  <td class="td">错误信息</td>
+                  <td class="td">具体怎么改</td>
+                  <td class="td">出现在最需要的时刻</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+        <p class="p">
+          注意：<strong>不是所有客户端都会自动读 Resource</strong
+          >。强模型会主动读，弱的不会。所以核心指引仍要留在
+          <code class="codespan">description</code> 里。
+        </p>
+        <p class="p">
+          一句话总结这一节：<strong
+            >工具的可发现性不是协议给的，是你写出来的。</strong
+          >
+          任何 SDK 都不会替你写 description、设计错误文本。
+        </p>
+        <hr
+          class="hr"
+          style="
+            height: 1px;
+            border: none;
+            margin: 2em 0;
+            background: linear-gradient(
+              to right,
+              rgba(0, 0, 0, 0),
+              rgba(0, 0, 0, 0.1),
+              rgba(0, 0, 0, 0)
+            );
+          "
+        />
+        <h2
+          class="h2"
+          data-heading="true"
+          style="
+            padding: 0.3em 1.2em;
+            font-size: calc(16px * 1.3);
+            border-radius: 8px 24px 8px 24px;
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.06);
+          "
+          id="s10"
+        >
+          10. 常见误解清单
+        </h2>
+        <section
+          style="
+            font-family:
+              -apple-system-font,
+              BlinkMacSystemFont,
+              Helvetica Neue,
+              PingFang SC,
+              Hiragino Sans GB,
+              Microsoft YaHei UI,
+              Microsoft YaHei,
+              Arial,
+              sans-serif;
+            font-size: 16px;
+            line-height: 1.75;
+            text-align: left;
+            max-width: 100%;
+            overflow: auto;
+          "
+        >
+          <div class="table-scroll">
+            <table class="preview-table" style="margin-top: 0 !important">
+              <thead>
+                <th class="th">误解</th>
+                <th class="th">实际</th>
+              </thead>
+              <tbody>
+                <tr class="tr">
+                  <td class="td">MCP 是一种 API 规范，像 REST</td>
+                  <td class="td">
+                    它是 RPC 风格的能力协商协议，只有一个端点，方法名在 body 里
+                  </td>
+                </tr>
+                <tr class="tr">
+                  <td class="td">每个工具一个 HTTP 路径</td>
+                  <td class="td">
+                    全部走
+                    <code class="codespan">tools/call</code>，工具名是参数
+                  </td>
+                </tr>
+                <tr class="tr">
+                  <td class="td">查询用 GET 更符合语义</td>
+                  <td class="td">会被缓存串味，且参数是嵌套 JSON，必须 POST</td>
+                </tr>
+                <tr class="tr">
+                  <td class="td">报错就返回 HTTP 4xx/5xx</td>
+                  <td class="td">
+                    两层都要给，<code class="codespan">-32601</code> 配
+                    <code class="codespan">404</code>，业务失败配
+                    <code class="codespan">200</code> +
+                    <code class="codespan">isError</code>
+                  </td>
+                </tr>
+                <tr class="tr">
+                  <td class="td">用 2025 年的示例应该兼容</td>
+                  <td class="td">握手、会话、GET 流都已删除，照抄会连不上</td>
+                </tr>
+                <tr class="tr">
+                  <td class="td">SSE 是必须的长连接</td>
+                  <td class="td">
+                    是<strong>可选</strong>的按需流，多数调用走普通 JSON
+                  </td>
+                </tr>
+                <tr class="tr">
+                  <td class="td">Resource 和 Tool 差不多</td>
+                  <td class="td">
+                    决策权不同：Tool 由模型决定调用，Resource 由应用决定加载
+                  </td>
+                </tr>
+                <tr class="tr">
+                  <td class="td">工具描述写得越详细越好</td>
+                  <td class="td">常驻上下文有预算，长内容应放 Resource</td>
+                </tr>
+                <tr class="tr">
+                  <td class="td">服务端不能有任何状态</td>
+                  <td class="td">
+                    协议层无状态；数据、缓存这类共享只读资源不违反
+                  </td>
+                </tr>
+                <tr class="tr">
+                  <td class="td">
+                    <code class="codespan">null</code> 是合法的
+                    <code class="codespan">id</code>
+                  </td>
+                  <td class="td">JSON-RPC 允许，MCP 明确禁止</td>
+                </tr>
+                <tr class="tr">
+                  <td class="td">
+                    <code class="codespan">resultType</code> 有
+                    <code class="codespan">error</code> 值
+                  </td>
+                  <td class="td">
+                    只有 <code class="codespan">complete</code> 与
+                    <code class="codespan">input_required</code
+                    >；错误是另一条响应分支
+                  </td>
+                </tr>
+                <tr class="tr">
+                  <td class="td">
+                    <code class="codespan">inputRequests</code> 是数组
+                  </td>
+                  <td class="td">
+                    是 map，键为服务端自起的标识符，值为一种客户端请求
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+        <hr
+          class="hr"
+          style="
+            height: 1px;
+            border: none;
+            margin: 2em 0;
+            background: linear-gradient(
+              to right,
+              rgba(0, 0, 0, 0),
+              rgba(0, 0, 0, 0.1),
+              rgba(0, 0, 0, 0)
+            );
+          "
+        />
+        <h2
+          class="h2"
+          data-heading="true"
+          style="
+            padding: 0.3em 1.2em;
+            font-size: calc(16px * 1.3);
+            border-radius: 8px 24px 8px 24px;
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.06);
+          "
+          id="s11"
+        >
+          11. 术语表
+        </h2>
+        <section
+          style="
+            font-family:
+              -apple-system-font,
+              BlinkMacSystemFont,
+              Helvetica Neue,
+              PingFang SC,
+              Hiragino Sans GB,
+              Microsoft YaHei UI,
+              Microsoft YaHei,
+              Arial,
+              sans-serif;
+            font-size: 16px;
+            line-height: 1.75;
+            text-align: left;
+            max-width: 100%;
+            overflow: auto;
+          "
+        >
+          <div class="table-scroll">
+            <table class="preview-table" style="margin-top: 0 !important">
+              <thead>
+                <th class="th">术语</th>
+                <th class="th">全称</th>
+                <th class="th">中文释义</th>
+              </thead>
+              <tbody>
+                <tr class="tr">
+                  <td class="td">MCP</td>
+                  <td class="td">Model Context Protocol</td>
+                  <td class="td">模型上下文协议</td>
+                </tr>
+                <tr class="tr">
+                  <td class="td">JSON-RPC</td>
+                  <td class="td">
+                    JavaScript Object Notation Remote Procedure Call
+                  </td>
+                  <td class="td">基于 JSON 的远程过程调用</td>
+                </tr>
+                <tr class="tr">
+                  <td class="td">RPC</td>
+                  <td class="td">Remote Procedure Call</td>
+                  <td class="td">远程过程调用</td>
+                </tr>
+                <tr class="tr">
+                  <td class="td">REST</td>
+                  <td class="td">Representational State Transfer</td>
+                  <td class="td">表述性状态转移</td>
+                </tr>
+                <tr class="tr">
+                  <td class="td">SSE</td>
+                  <td class="td">Server-Sent Events</td>
+                  <td class="td">服务器发送事件</td>
+                </tr>
+                <tr class="tr">
+                  <td class="td">stdio</td>
+                  <td class="td">Standard Input/Output</td>
+                  <td class="td">标准输入输出</td>
+                </tr>
+                <tr class="tr">
+                  <td class="td">MRTR</td>
+                  <td class="td">Multi Round-Trip Requests</td>
+                  <td class="td">多轮往返请求</td>
+                </tr>
+                <tr class="tr">
+                  <td class="td">SSRF</td>
+                  <td class="td">Server-Side Request Forgery</td>
+                  <td class="td">服务端请求伪造</td>
+                </tr>
+                <tr class="tr">
+                  <td class="td">TTL</td>
+                  <td class="td">Time To Live</td>
+                  <td class="td">存活时间</td>
+                </tr>
+                <tr class="tr">
+                  <td class="td">P95</td>
+                  <td class="td">95th Percentile</td>
+                  <td class="td">95 分位响应时间</td>
+                </tr>
+                <tr class="tr">
+                  <td class="td">CDN</td>
+                  <td class="td">Content Delivery Network</td>
+                  <td class="td">内容分发网络</td>
+                </tr>
+                <tr class="tr">
+                  <td class="td">IdP</td>
+                  <td class="td">Identity Provider</td>
+                  <td class="td">身份提供商</td>
+                </tr>
+                <tr class="tr">
+                  <td class="td">OIDC</td>
+                  <td class="td">OpenID Connect</td>
+                  <td class="td">基于 OAuth 的身份认证层</td>
+                </tr>
+                <tr class="tr">
+                  <td class="td">CIMD</td>
+                  <td class="td">Client ID Metadata Documents</td>
+                  <td class="td">客户端 ID 元数据文档</td>
+                </tr>
+                <tr class="tr">
+                  <td class="td">PoC</td>
+                  <td class="td">Proof of Concept</td>
+                  <td class="td">概念验证</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+        <hr
+          class="hr"
+          style="
+            height: 1px;
+            border: none;
+            margin: 2em 0;
+            background: linear-gradient(
+              to right,
+              rgba(0, 0, 0, 0),
+              rgba(0, 0, 0, 0.1),
+              rgba(0, 0, 0, 0)
+            );
+          "
+        />
+        <h2
+          class="h2"
+          data-heading="true"
+          style="
+            padding: 0.3em 1.2em;
+            font-size: calc(16px * 1.3);
+            border-radius: 8px 24px 8px 24px;
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.06);
+          "
+          id="s12"
+        >
+          12. 参考
+        </h2>
+        <p class="p">
+          以下链接于 2026-11-11 逐个实测，均返回 HTTP
+          200。每条末尾的「对应」指本文哪几节引用了它，方便回溯原始措辞。
+        </p>
+        <h3
+          class="h3"
+          data-heading="true"
+          style="
+            padding-left: 12px;
+            font-size: calc(16px * 1.2);
+            border-radius: 6px;
+            line-height: 2.4em;
+            border-left: 4px solid #0f4c81;
+            border-right: 1px solid color-mix(in srgb, #0f4c81 10%, transparent);
+            border-bottom: 1px solid
+              color-mix(in srgb, #0f4c81 10%, transparent);
+            border-top: 1px solid color-mix(in srgb, #0f4c81 10%, transparent);
+            background: color-mix(in srgb, #0f4c81 8%, transparent);
+          "
+          id="s12-1"
+        >
+          12.1 规范正文（2026-07-28）
+        </h3>
+        <ul class="ul" style="list-style: none; padding-left: 1.5em">
+          <li class="listitem" style="margin: 0.5em 8px">
+            •
+            <a
+              href="https://modelcontextprotocol.io/specification/2026-07-28"
+              title="规范总目录"
+              style="color: #576b95; text-decoration: none"
+              >规范总目录</a
+            >
+            — 版本入口与全部章节
+          </li>
+          <li class="listitem" style="margin: 0.5em 8px">
+            •
+            <a
+              href="https://modelcontextprotocol.io/specification/2026-07-28/basic"
+              title="基础层"
+              style="color: #576b95; text-decoration: none"
+              >基础层</a
+            >
+            — 消息类型、<code class="codespan">id</code> 规则、错误码区间、<code
+              class="codespan"
+              >_meta</code
+            >
+            信封；对应 §3、§8.1
+          </li>
+          <li class="listitem" style="margin: 0.5em 8px">
+            •
+            <a
+              href="https://modelcontextprotocol.io/specification/2026-07-28/basic/transports"
+              title="传输层总览"
+              style="color: #576b95; text-decoration: none"
+              >传输层总览</a
+            >
+            — 传输绑定的职责边界、元数据镜像原则；对应 §4
+          </li>
+          <li class="listitem" style="margin: 0.5em 8px">
+            •
+            <a
+              href="https://modelcontextprotocol.io/specification/2026-07-28/basic/transports/streamable-http"
+              title="Streamable HTTP"
+              style="color: #576b95; text-decoration: none"
+              >Streamable HTTP</a
+            >
+            — 必填请求头、状态码映射、SSE 分帧、取消规则、会话移除；对应
+            §4.2、§4.5
+          </li>
+          <li class="listitem" style="margin: 0.5em 8px">
+            •
+            <a
+              href="https://modelcontextprotocol.io/specification/2026-07-28/basic/transports/stdio"
+              title="stdio"
+              style="color: #576b95; text-decoration: none"
+              >stdio</a
+            >
+            — 换行分帧与 stderr 约定；对应 §4.1
+          </li>
+          <li class="listitem" style="margin: 0.5em 8px">
+            •
+            <a
+              href="https://modelcontextprotocol.io/specification/2026-07-28/basic/patterns"
+              title="消息模式"
+              style="color: #576b95; text-decoration: none"
+              >消息模式</a
+            >
+            — 请求响应、MRTR、订阅通知三种模式；对应 §3、§7.4
+          </li>
+          <li class="listitem" style="margin: 0.5em 8px">
+            •
+            <a
+              href="https://modelcontextprotocol.io/specification/2026-07-28/basic/patterns/mrtr"
+              title="多轮往返 MRTR"
+              style="color: #576b95; text-decoration: none"
+              >多轮往返 MRTR</a
+            >
+            — <code class="codespan">input_required</code>、<code
+              class="codespan"
+              >inputRequests</code
+            >、<code class="codespan">requestState</code>
+            的完整定义与安全要求；对应 §3.2、§7.4
+          </li>
+          <li class="listitem" style="margin: 0.5em 8px">
+            •
+            <a
+              href="https://modelcontextprotocol.io/specification/2026-07-28/basic/patterns/cancellation"
+              title="取消"
+              style="color: #576b95; text-decoration: none"
+              >取消</a
+            >
+            — 两种传输各自的取消机制；对应 §4.5
+          </li>
+          <li class="listitem" style="margin: 0.5em 8px">
+            •
+            <a
+              href="https://modelcontextprotocol.io/specification/2026-07-28/basic/versioning"
+              title="版本与兼容"
+              style="color: #576b95; text-decoration: none"
+              >版本与兼容</a
+            >
+            — 新旧代识别规则与兼容矩阵；对应 §2、§7.5
+          </li>
+          <li class="listitem" style="margin: 0.5em 8px">
+            •
+            <a
+              href="https://modelcontextprotocol.io/specification/2026-07-28/server/tools"
+              title="工具"
+              style="color: #576b95; text-decoration: none"
+              >工具</a
+            >
+            — <code class="codespan">tools/list</code>、<code class="codespan"
+              >tools/call</code
+            >、<code class="codespan">inputSchema</code>、<code class="codespan"
+              >outputSchema</code
+            >、<code class="codespan">structuredContent</code>；对应
+            §6、§7.2、§7.3、§9
+          </li>
+          <li class="listitem" style="margin: 0.5em 8px">
+            •
+            <a
+              href="https://modelcontextprotocol.io/specification/2026-07-28/server/resources"
+              title="资源"
+              style="color: #576b95; text-decoration: none"
+              >资源</a
+            >
+            — <code class="codespan">resources/list</code>、<code
+              class="codespan"
+              >resources/read</code
+            >、模板；对应 §5
+          </li>
+          <li class="listitem" style="margin: 0.5em 8px">
+            •
+            <a
+              href="https://modelcontextprotocol.io/specification/2026-07-28/server/prompts"
+              title="提示"
+              style="color: #576b95; text-decoration: none"
+              >提示</a
+            >
+            — <code class="codespan">prompts/list</code>、<code class="codespan"
+              >prompts/get</code
+            >；对应 §5
+          </li>
+          <li class="listitem" style="margin: 0.5em 8px">
+            •
+            <a
+              href="https://modelcontextprotocol.io/specification/2026-07-28/server/discover"
+              title="发现"
+              style="color: #576b95; text-decoration: none"
+              >发现</a
+            >
+            —
+            <code class="codespan">server/discover</code>
+            的请求、响应与缓存提示；对应 §7.1
+          </li>
+        </ul>
+        <h3
+          class="h3"
+          data-heading="true"
+          style="
+            padding-left: 12px;
+            font-size: calc(16px * 1.2);
+            border-radius: 6px;
+            line-height: 2.4em;
+            border-left: 4px solid #0f4c81;
+            border-right: 1px solid color-mix(in srgb, #0f4c81 10%, transparent);
+            border-bottom: 1px solid
+              color-mix(in srgb, #0f4c81 10%, transparent);
+            border-top: 1px solid color-mix(in srgb, #0f4c81 10%, transparent);
+            background: color-mix(in srgb, #0f4c81 8%, transparent);
+          "
+          id="s12-2"
+        >
+          12.2 发布说明与架构文档
+        </h3>
+        <ul class="ul" style="list-style: none; padding-left: 1.5em">
+          <li class="listitem" style="margin: 0.5em 8px">
+            •
+            <a
+              href="https://blog.modelcontextprotocol.io/posts/2026-07-28/"
+              title="2026-07-28 发布说明"
+              style="color: #576b95; text-decoration: none"
+              >2026-07-28 发布说明</a
+            >
+            — 本版每项变更的官方动机，是 §2 那张动机表的一手来源
+          </li>
+          <li class="listitem" style="margin: 0.5em 8px">
+            •
+            <a
+              href="https://modelcontextprotocol.io/docs/learn/architecture"
+              title="架构概览"
+              style="color: #576b95; text-decoration: none"
+              >架构概览</a
+            >
+            — 原语定义与一次完整调用（发现 → 列工具 → 调用）的逐步走查；对应
+            §3、§5、§7
+          </li>
+        </ul>
+        <h3
+          class="h3"
+          data-heading="true"
+          style="
+            padding-left: 12px;
+            font-size: calc(16px * 1.2);
+            border-radius: 6px;
+            line-height: 2.4em;
+            border-left: 4px solid #0f4c81;
+            border-right: 1px solid color-mix(in srgb, #0f4c81 10%, transparent);
+            border-bottom: 1px solid
+              color-mix(in srgb, #0f4c81 10%, transparent);
+            border-top: 1px solid color-mix(in srgb, #0f4c81 10%, transparent);
+            background: color-mix(in srgb, #0f4c81 8%, transparent);
+          "
+          id="s12-3"
+        >
+          12.3 底层标准
+        </h3>
+        <ul class="ul" style="list-style: none; padding-left: 1.5em">
+          <li class="listitem" style="margin: 0.5em 8px">
+            •
+            <a
+              href="https://www.jsonrpc.org/specification"
+              title="JSON-RPC 2.0 规范"
+              style="color: #576b95; text-decoration: none"
+              >JSON-RPC 2.0 规范</a
+            >
+            — 错误码原始定义、批处理、通知语义；对应 §3.1、§8.1
+          </li>
+        </ul>
+        <h3
+          class="h3"
+          data-heading="true"
+          style="
+            padding-left: 12px;
+            font-size: calc(16px * 1.2);
+            border-radius: 6px;
+            line-height: 2.4em;
+            border-left: 4px solid #0f4c81;
+            border-right: 1px solid color-mix(in srgb, #0f4c81 10%, transparent);
+            border-bottom: 1px solid
+              color-mix(in srgb, #0f4c81 10%, transparent);
+            border-top: 1px solid color-mix(in srgb, #0f4c81 10%, transparent);
+            background: color-mix(in srgb, #0f4c81 8%, transparent);
+          "
+          id="s12-4"
+        >
+          12.4 查阅旧版
+        </h3>
+        <p class="p">
+          本文以
+          <code class="codespan">2026-07-28</code> 为基准。需要对照旧版时，把
+          URL 里的版本号换掉即可：
+        </p>
+        <pre
+          class="hljs code__pre"
+          style="border: 1px solid rgba(0, 0, 0, 0.04)"
+        ><span class="mac-sign" style="display: none; padding: 10px 14px 0;"><svg xmlns="http://www.w3.org/2000/svg" version="1.1" x="0px" y="0px" width="45px" height="13px" viewBox="0 0 450 130">
+    <ellipse cx="50" cy="65" rx="50" ry="52" stroke="rgb(220,60,54)" stroke-width="2" fill="rgb(237,108,96)"/>
+    <ellipse cx="225" cy="65" rx="50" ry="52" stroke="rgb(218,151,33)" stroke-width="2" fill="rgb(247,193,81)"/>
+    <ellipse cx="400" cy="65" rx="50" ry="52" stroke="rgb(27,161,37)" stroke-width="2" fill="rgb(100,200,86)"/>
+  </svg></span><code class="language-text" style="font-family: 'Fira Code',
+    Menlo,
+    Operator Mono,
+    Consolas,
+    Monaco,
+    monospace;">https://modelcontextprotocol.io/specification/&lt;版本号&gt;/</code></pre>
+        <p class="p">
+          可用版本号：<code class="codespan">2025-11-25</code>、<code
+            class="codespan"
+            >2025-06-18</code
+          >、<code class="codespan">2025-03-26</code>、<code class="codespan"
+            >2024-11-05</code
+          >。查旧版时注意第 7.5
+          节那张差异表——旧版的写法大多已被删除，不能直接照抄。
+        </p>
+      </section>
+    </div>
+
+    <script>
+      (function () {
+        var root = document.documentElement;
+        var themeBtn = document.getElementById("themeBtn");
+        var iconMoon = document.getElementById("iconMoon");
+        var iconSun = document.getElementById("iconSun");
+
+        function syncIcon() {
+          var dark = root.classList.contains("dark");
+          iconMoon.style.display = dark ? "none" : "";
+          iconSun.style.display = dark ? "" : "none";
+        }
+        syncIcon();
+
+        themeBtn.addEventListener("click", function () {
+          var dark = !root.classList.contains("dark");
+          root.classList.toggle("dark", dark);
+          root.classList.toggle("light", !dark);
+          try {
+            localStorage.setItem("mcp-doc-theme", dark ? "dark" : "light");
+          } catch (e) {}
+          syncIcon();
+        });
+
+        // 抽屉
+        var drawer = document.getElementById("tocDrawer");
+        var mask = document.getElementById("tocMask");
+        function openToc() {
+          drawer.classList.add("open");
+          mask.classList.add("open");
+        }
+        function closeToc() {
+          drawer.classList.remove("open");
+          mask.classList.remove("open");
+        }
+        document.getElementById("tocBtn").addEventListener("click", openToc);
+        document.getElementById("tocClose").addEventListener("click", closeToc);
+        mask.addEventListener("click", closeToc);
+        drawer.addEventListener("click", function (e) {
+          if (e.target.closest(".toc-item")) closeToc();
+        });
+        document.addEventListener("keydown", function (e) {
+          if (e.key === "Escape") closeToc();
+        });
+
+        // 回到顶部
+        document
+          .getElementById("topBtn")
+          .addEventListener("click", function () {
+            window.scrollTo({ top: 0, behavior: "smooth" });
+          });
+
+        // 阅读进度
+        var progress = document.getElementById("progress");
+        var ticking = false;
+        function onScroll() {
+          if (ticking) return;
+          ticking = true;
+          requestAnimationFrame(function () {
+            var h = document.documentElement.scrollHeight - window.innerHeight;
+            progress.style.width =
+              (h > 0 ? (window.scrollY / h) * 100 : 0) + "%";
+            ticking = false;
+          });
+        }
+        window.addEventListener("scroll", onScroll, { passive: true });
+        onScroll();
+
+        // 当前章节高亮
+        var links = Array.prototype.slice.call(
+          document.querySelectorAll(".toc-item"),
+        );
+        var targets = links.map(function (a) {
+          return document.getElementById(a.dataset.target);
+        });
+        function highlight() {
+          var best = 0,
+            y = 96;
+          for (var i = 0; i < targets.length; i++) {
+            if (!targets[i]) continue;
+            if (targets[i].getBoundingClientRect().top <= y) best = i;
+          }
+          links.forEach(function (a, i) {
+            a.classList.toggle("active", i === best);
+          });
+        }
+        window.addEventListener(
+          "scroll",
+          function () {
+            if (!ticking) requestAnimationFrame(highlight);
+          },
+          { passive: true },
+        );
+        highlight();
+
+        // 代码块复制
+        document
+          .querySelectorAll("pre.code__pre, pre.hljs")
+          .forEach(function (pre) {
+            var btn = document.createElement("button");
+            btn.className = "copy-btn";
+            btn.type = "button";
+            btn.textContent = "复制";
+            pre.appendChild(btn);
+            btn.addEventListener("click", function () {
+              var code = pre.querySelector("code");
+              var text = code ? code.innerText : pre.innerText;
+              var done = function () {
+                btn.textContent = "已复制";
+                setTimeout(function () {
+                  btn.textContent = "复制";
+                }, 1400);
+              };
+              if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(text).then(done).catch(fallback);
+              } else {
+                fallback();
+              }
+              function fallback() {
+                var ta = document.createElement("textarea");
+                ta.value = text;
+                ta.style.position = "fixed";
+                ta.style.opacity = "0";
+                document.body.appendChild(ta);
+                ta.select();
+                try {
+                  document.execCommand("copy");
+                  done();
+                } catch (e) {}
+                document.body.removeChild(ta);
+              }
+            });
+          });
+      })();
+    </script>
+  </body>
+</html>
